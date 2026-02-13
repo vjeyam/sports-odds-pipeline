@@ -100,6 +100,64 @@ CREATE TABLE IF NOT EXISTS fact_game_results_best_market (
   favorite_side TEXT,    -- which side had lower (more negative) price
   underdog_side TEXT     -- opposite of favorite
 );
+
+-- Calibration summary by implied-probability bucket (favorite side)
+CREATE TABLE IF NOT EXISTS fact_calibration_favorite (
+  bucket_label TEXT PRIMARY KEY,      -- e.g. "0.50-0.55"
+  bucket_min REAL NOT NULL,
+  bucket_max REAL NOT NULL,
+
+  n_games INTEGER NOT NULL,
+  favorite_win_rate REAL NOT NULL,    -- actual
+  avg_implied_prob REAL NOT NULL,     -- expected
+  diff_actual_minus_implied REAL NOT NULL  -- calibration error
+);
+
+-- Sportsbook vig / margin summary from closing lines
+CREATE TABLE IF NOT EXISTS fact_book_margin_summary (
+  bookmaker_key TEXT PRIMARY KEY,
+  n_games INTEGER NOT NULL,
+  avg_overround REAL NOT NULL,
+  median_overround REAL NOT NULL,
+  min_overround REAL NOT NULL,
+  max_overround REAL NOT NULL
+);
+
+-- How often each book provides the best available price (best-market frequency)
+CREATE TABLE IF NOT EXISTS fact_best_market_frequency (
+  bookmaker_key TEXT PRIMARY KEY,
+  best_home_count INTEGER NOT NULL,
+  best_away_count INTEGER NOT NULL,
+  best_total_count INTEGER NOT NULL,
+  best_share REAL NOT NULL
+);
+
+-- Per-game equity curve for each strategy (for cumulative profit charting)
+CREATE TABLE IF NOT EXISTS fact_strategy_equity_curve (
+  strategy TEXT NOT NULL,            -- favorite/underdog/home/away
+  game_index INTEGER NOT NULL,       -- 1..N in time order
+
+  odds_event_id TEXT NOT NULL,
+  espn_event_id TEXT NOT NULL,
+  commence_time TEXT,
+
+  stake REAL NOT NULL,
+  odds_american INTEGER NOT NULL,
+  picked_side TEXT NOT NULL,         -- home/away
+  winner TEXT NOT NULL,              -- home/away
+
+  bet_profit REAL NOT NULL,          -- profit for that bet (can be negative)
+  cum_profit REAL NOT NULL,          -- cumulative profit
+  cum_roi REAL NOT NULL,             -- cum_profit / (game_index*stake)
+
+  PRIMARY KEY (strategy, odds_event_id)
+);
+
+-- Dashboard KPI rollup (key/value style for flexibility)
+CREATE TABLE IF NOT EXISTS fact_dashboard_kpis (
+  kpi_name TEXT PRIMARY KEY,
+  kpi_value TEXT NOT NULL
+);
 """
 
 def connect(db_path: str) -> sqlite3.Connection:
