@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -15,9 +16,48 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def main():
+def run_odds_snapshot(
+    *,
+    db_path: str = "odds.sqlite",
+    sport: str = "basketball_nba",
+    regions: str = "us",
+    bookmakers: Optional[str] = None,
+) -> dict:
+    """
+    Programmatic entrypoint (used by Streamlit).
+    Returns a small summary dict for logging/diagnostics.
+    """
     load_dotenv()
+    snapshot_ts = utc_now_iso()
 
+    r, payload = fetch_odds_moneyline(
+        sport_key=sport,
+        regions=regions,
+        bookmakers=bookmakers,
+    )
+    print_quota_headers(r)
+
+    rows = flatten_moneyline(snapshot_ts, payload)
+    inserted = insert_raw_moneyline_rows(db_path, rows)
+
+    # Optional convenience: build these right after snapshot
+    closing_rows = build_closing_lines(db_path)
+    best_rows = build_best_market_lines(db_path)
+
+    return {
+        "snapshot_ts": snapshot_ts,
+        "sport": sport,
+        "regions": regions,
+        "bookmakers": bookmakers,
+        "events": len(payload),
+        "rows_flattened": len(rows),
+        "inserted_or_ignored": inserted,
+        "closing_rows": closing_rows,
+        "best_market_rows": best_rows,
+    }
+
+
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sport", default="basketball_nba")
     ap.add_argument("--regions", default="us")
@@ -25,24 +65,18 @@ def main():
     ap.add_argument("--bookmakers", default=None, help="optional comma-separated bookmaker keys")
     args = ap.parse_args()
 
-    snapshot_ts = utc_now_iso()
-
-    r, payload = fetch_odds_moneyline(
-        sport_key=args.sport,
+    summary = run_odds_snapshot(
+        db_path=args.db,
+        sport=args.sport,
         regions=args.regions,
         bookmakers=args.bookmakers,
     )
-    print_quota_headers(r)
 
-    rows = flatten_moneyline(snapshot_ts, payload)
-    inserted = insert_raw_moneyline_rows(args.db, rows)
-
-    closing_rows = build_closing_lines(args.db)
-    best_rows = build_best_market_lines(args.db)
-
-    print(f"snapshot_ts={snapshot_ts}")
-    print(f"events={len(payload)} rows_flattened={len(rows)} inserted_or_ignored={inserted}")
-    print(f"closing_rows={closing_rows} best_market_rows={best_rows}")
+    print(
+        f"snapshot_ts={summary['snapshot_ts']}\n"
+        f"events={summary['events']} rows_flattened={summary['rows_flattened']} inserted_or_ignored={summary['inserted_or_ignored']}\n"
+        f"closing_rows={summary['closing_rows']} best_market_rows={summary['best_market_rows']}"
+    )
     return 0
 
 
