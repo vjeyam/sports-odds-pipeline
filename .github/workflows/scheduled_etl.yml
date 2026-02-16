@@ -1,0 +1,103 @@
+name: Scheduled ETL (Odds + Results)
+
+on:
+  schedule:
+    # ----- Odds pull: 8–9 AM Chicago -----
+    # 08:05 CST  = 14:05 UTC (winter)
+    - cron: "5 14 * * *"
+    # 08:05 CDT  = 13:05 UTC (summer)
+    - cron: "5 13 * * *"
+
+    # ----- Results pull: 2 AM Chicago (next day) -----
+    # 02:05 CST  = 08:05 UTC (winter)
+    - cron: "5 8 * * *"
+    # 02:05 CDT  = 07:05 UTC (summer)
+    - cron: "5 7 * * *"
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scheduled-etl
+  cancel-in-progress: false
+
+jobs:
+  pull_odds:
+    # Run only on the two odds cron times
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '5 14 * * *' || github.event.schedule == '5 13 * * *'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Pull odds snapshot
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python -m src.pipelines.run_odds_snapshot --sport basketball_nba --regions us --db odds.sqlite
+
+      - name: Commit DB if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add odds.sqlite || true
+          if git diff --cached --quiet; then
+            echo "No DB changes to commit."
+          else
+            git commit -m "chore: daily odds snapshot"
+            git push
+          fi
+
+  pull_results:
+    # Run only on the two results cron times
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '5 8 * * *' || github.event.schedule == '5 7 * * *'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Pull ESPN results (yesterday + today default)
+        run: |
+          python -m src.pipelines.run_espn_results_pull --db odds.sqlite
+
+      - name: Run transforms (refresh fact tables)
+        run: |
+          python -m src.transform.build_game_id_map --db odds.sqlite
+          python -m src.transform.build_fact_game_results_best_market --db odds.sqlite
+          python -m src.transform.simulate_strategies --db odds.sqlite
+
+      - name: Commit DB if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add odds.sqlite || true
+          if git diff --cached --quiet; then
+            echo "No DB changes to commit."
+          else
+            git commit -m "chore: daily results + transforms"
+            git push
+          fi
