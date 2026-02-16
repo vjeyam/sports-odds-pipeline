@@ -40,7 +40,6 @@ In project root:
 
 ```.env
 ODDS_API_KEY=your_odds_api_key_here
-ADMIN_KEY=your_secure_admin_password_here
 ```
 
 4. Run the dashboard:

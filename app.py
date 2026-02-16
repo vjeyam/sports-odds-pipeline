@@ -31,8 +31,11 @@ st.title("Sports Market Efficiency & Pricing Analysis")
 st.caption("Equity • Calibration • Vig/Overround • Best-market frequency • KPIs")
 
 # Config
-DEFAULT_DB_PATH = "odds.sqlite"
 ADMIN_KEY_ENV = "ADMIN_KEY"
+
+# Static demo defaults
+DEMO_MODE = os.getenv("DEMO_MODE", "1").strip() == "1"
+DEFAULT_DB_PATH = os.getenv("DEMO_DB_PATH", "data/demo_odds.sqlite")
 
 
 @dataclass(frozen=True)
@@ -67,12 +70,13 @@ def admin_controls() -> None:
         if is_admin():
             st.success("Admin mode enabled")
 
-            st.toggle(
-                "Lock user updates",
-                key="lock_user_updates",
-                value=st.session_state.get("lock_user_updates", False),
-                help="When enabled, non-admin users cannot run updates.",
-            )
+            if not DEMO_MODE:
+                st.toggle(
+                    "Lock user updates",
+                    key="lock_user_updates",
+                    value=st.session_state.get("lock_user_updates", False),
+                    help="When enabled, non-admin users cannot run updates.",
+                )
 
             st.button(
                 "Cancel current run",
@@ -358,9 +362,9 @@ admin_mode = is_admin()
 if admin_mode and not os.getenv(ADMIN_KEY_ENV):
     st.sidebar.warning("ADMIN_KEY is not set (check your .env).")
 
-# DB path: hidden for users, visible for admin
+# DB path: hidden for users, visible for admin (unless demo mode)
 db_path = DEFAULT_DB_PATH
-if admin_mode:
+if admin_mode and not DEMO_MODE:
     st.sidebar.markdown("---")
     db_path = st.sidebar.text_input("SQLite DB Path", value=DEFAULT_DB_PATH)
 
@@ -368,6 +372,7 @@ if not os.path.exists(db_path):
     st.error(f"Database not found at: {db_path}")
     st.stop()
 
+# Update controls
 st.sidebar.markdown("---")
 st.sidebar.markdown("### Update")
 
@@ -375,30 +380,30 @@ stake = st.sidebar.number_input("Stake (strategy sim)", value=1.0, step=0.25)
 cal_step = st.sidebar.selectbox("Calibration step", options=[0.02, 0.05, 0.10], index=1)
 auto_scale_cal = st.sidebar.checkbox("Auto-scale calibration axes", value=False)
 
-updates_locked = bool(st.session_state.get("lock_user_updates", False))
-can_run = admin_mode or not updates_locked
-
-if not can_run:
-    st.sidebar.button("Update Odds (Run ETL)", disabled=True, use_container_width=True)
-    st.sidebar.warning("Updates are disabled by admin.")
+if DEMO_MODE:
+    st.sidebar.caption("Demo mode: ETL updates are disabled.")
 else:
-    if st.sidebar.button("Update Odds (Run ETL)", use_container_width=True):
-        st.session_state["last_pipeline_error"] = None
-        before = load_table_counts(db_path)
-        try:
-            with st.spinner("Running ETL: odds → results → transforms..."):
-                st.session_state["last_update_summary"] = run_full_update(
-                    db_path=db_path, stake=float(stake), cal_step=float(cal_step)
-                )
-            wal_checkpoint(db_path)
-        except Exception as e:
-            st.session_state["last_pipeline_error"] = str(e)
+    # Only admin can run ETL in non-demo mode
+    if not admin_mode:
+        st.sidebar.caption("Updates disabled (admin only).")
+    else:
+        if st.sidebar.button("Update Odds (Run ETL)", use_container_width=True):
+            st.session_state["last_pipeline_error"] = None
+            before = load_table_counts(db_path)
+            try:
+                with st.spinner("Running ETL: odds → results → transforms..."):
+                    st.session_state["last_update_summary"] = run_full_update(
+                        db_path=db_path, stake=float(stake), cal_step=float(cal_step)
+                    )
+                wal_checkpoint(db_path)
+            except Exception as e:
+                st.session_state["last_pipeline_error"] = str(e)
 
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        after = load_table_counts(db_path)
-        st.session_state["last_pipeline_diff"] = diff_counts(before, after)
-        st.rerun()
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            after = load_table_counts(db_path)
+            st.session_state["last_pipeline_diff"] = diff_counts(before, after)
+            st.rerun()
 
 # raw previews only for admin
 show_raw = False
