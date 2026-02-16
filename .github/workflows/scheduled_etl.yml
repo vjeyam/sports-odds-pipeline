@@ -2,19 +2,28 @@ name: Scheduled ETL (Odds + Results)
 
 on:
   schedule:
-    # ----- Odds pull: 8–9 AM Chicago -----
-    # 08:05 CST  = 14:05 UTC (winter)
+    # Odds pull: 8:05 AM Chicago
+    # 08:05 CST = 14:05 UTC (winter)
     - cron: "5 14 * * *"
-    # 08:05 CDT  = 13:05 UTC (summer)
+    # 08:05 CDT = 13:05 UTC (summer)
     - cron: "5 13 * * *"
 
-    # ----- Results pull: 2 AM Chicago (next day) -----
-    # 02:05 CST  = 08:05 UTC (winter)
+    # Results pull: 2:05 AM Chicago (next day)
+    # 02:05 CST = 08:05 UTC (winter)
     - cron: "5 8 * * *"
-    # 02:05 CDT  = 07:05 UTC (summer)
+    # 02:05 CDT = 07:05 UTC (summer)
     - cron: "5 7 * * *"
 
   workflow_dispatch:
+    inputs:
+      task:
+        description: "Which task to run?"
+        required: true
+        default: "odds"
+        type: choice
+        options:
+          - odds
+          - results
 
 permissions:
   contents: write
@@ -24,10 +33,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pull_odds:
-    # Run only on the two odds cron times
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '5 14 * * *' || github.event.schedule == '5 13 * * *'
+  etl:
     runs-on: ubuntu-latest
+
+    env:
+      DB_PATH: data/demo_odds.sqlite
 
     steps:
       - name: Checkout
@@ -38,66 +48,86 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Decide task (odds vs results)
+        id: decide
+        run: |
+          set -e
+          S="${{ github.event.schedule }}"
+          TASK="${{ inputs.task }}"
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            if [ "$S" = "5 14 * * *" ] || [ "$S" = "5 13 * * *" ]; then
+              echo "task=odds" >> $GITHUB_OUTPUT
+            elif [ "$S" = "5 8 * * *" ] || [ "$S" = "5 7 * * *" ]; then
+              echo "task=results" >> $GITHUB_OUTPUT
+            else
+              echo "Unknown schedule: $S"
+              exit 1
+            fi
+          else
+            echo "task=$TASK" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Ensure data folder exists
+        run: |
+          mkdir -p data
+
+      # ODDS (8:05 AM Chicago)
       - name: Pull odds snapshot
+        if: steps.decide.outputs.task == 'odds'
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
-          python -m src.pipelines.run_odds_snapshot --sport basketball_nba --regions us --db odds.sqlite
+          python -m src.pipelines.run_odds_snapshot --sport basketball_nba --regions us --db "${DB_PATH}"
+
+      # RESULTS (2:05 AM Chicago)
+      - name: Pull ESPN results (yesterday Chicago)
+        if: steps.decide.outputs.task == 'results'
+        run: |
+          YDAY=$(TZ=America/Chicago date -d 'yesterday' +%Y%m%d)
+          python -m src.pipelines.run_espn_results_pull --db "${DB_PATH}" --date "$YDAY"
+
+      - name: Run transforms (build fact tables)
+        if: steps.decide.outputs.task == 'results'
+        run: |
+          python - << 'PY'
+          from src.pipelines.run_full_pipeline import run_transforms
+          run_transforms("data/demo_odds.sqlite", stake=1.0, calibration_step=0.05)
+          PY
+
+      # CHECKPOINT WAL -> main file and cleanup sidecars
+      - name: SQLite checkpoint + cleanup
+        run: |
+          python - << 'PY'
+          import sqlite3
+          db = "data/demo_odds.sqlite"
+          con = sqlite3.connect(db)
+          con.execute("PRAGMA wal_checkpoint(FULL);")
+          con.commit()
+          con.close()
+          PY
+          rm -f "${DB_PATH}-wal" "${DB_PATH}-shm" || true
 
       - name: Commit DB if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add odds.sqlite || true
+
+          git add "${DB_PATH}" || true
+
           if git diff --cached --quiet; then
             echo "No DB changes to commit."
-          else
-            git commit -m "chore: daily odds snapshot"
-            git push
+            exit 0
           fi
 
-  pull_results:
-    # Run only on the two results cron times
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '5 8 * * *' || github.event.schedule == '5 7 * * *'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Pull ESPN results (yesterday + today default)
-        run: |
-          python -m src.pipelines.run_espn_results_pull --db odds.sqlite
-
-      - name: Run transforms (refresh fact tables)
-        run: |
-          python -m src.transform.build_game_id_map --db odds.sqlite
-          python -m src.transform.build_fact_game_results_best_market --db odds.sqlite
-          python -m src.transform.simulate_strategies --db odds.sqlite
-
-      - name: Commit DB if changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add odds.sqlite || true
-          if git diff --cached --quiet; then
-            echo "No DB changes to commit."
+          if [ "${{ steps.decide.outputs.task }}" = "odds" ]; then
+            git commit -m "chore: daily odds snapshot"
           else
             git commit -m "chore: daily results + transforms"
-            git push
           fi
+
+          git push
