@@ -7,3 +7,5 @@ python-dotenv
 requests
 scikit-learn
 psycopg[binary]>=3.2
+fastapi>=0.115
+uvicorn[standard]>=0.30

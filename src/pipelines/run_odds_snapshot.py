@@ -19,7 +19,7 @@ def utc_now_iso() -> str:
 
 def run_odds_snapshot(
     *,
-    db_path: str = "odds.sqlite",
+    db_path: str | None = None,
     sport: str = "basketball_nba",
     regions: str = "us",
     bookmakers: Optional[str] = None,
@@ -39,7 +39,6 @@ def run_odds_snapshot(
 
     rows = flatten_moneyline(snapshot_ts, payload)
     inserted = insert_raw_moneyline_rows(db_target, rows)
-
     closing_rows = build_closing_lines(db_target)
     best_rows = build_best_market_lines(db_target)
 

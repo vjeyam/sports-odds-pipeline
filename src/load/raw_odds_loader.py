@@ -59,7 +59,7 @@ def flatten_moneyline(snapshot_ts: str, payload: List[Dict[str, Any]]) -> List[T
     return rows
 
 
-def insert_raw_moneyline_rows(db_path: str, rows: Iterable[Tuple]) -> int:
+def insert_raw_moneyline_rows(db_path: str | None, rows: Iterable[Tuple]) -> int:
     conn = connect(db_path)
     ensure_schema(conn)
 
