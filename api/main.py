@@ -234,8 +234,8 @@ def job_build_calibration_favorite(req: CalibrationRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/games/odds")
-def api_games_odds(date: str = Query(..., description="YYYY-MM-DD (UTC date prefix)")):
+@app.get("/games/odds")
+def api_games_odds(date: str):
     try:
         date_type.fromisoformat(date)
     except ValueError:
@@ -258,3 +258,8 @@ def api_games_odds(date: str = Query(..., description="YYYY-MM-DD (UTC date pref
     """
     cur.execute(sql, (f"{date}%",))
     return _rows_to_dicts(cur)
+
+
+@app.get("/api/games/odds")
+def api_games_odds_alias(date: str):
+    return api_games_odds(date)
