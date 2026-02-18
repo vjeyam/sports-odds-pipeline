@@ -1,17 +1,15 @@
 name: Scheduled ETL (Odds + Results)
 
 on:
-  schedule:
-    # Odds pull: 8:05 AM Chicago
-    # 08:05 CST = 14:05 UTC (winter)
-    - cron: "5 14 * * *"
-    # 08:05 CDT = 13:05 UTC (summer)
-    - cron: "5 13 * * *"
+  # run automatically when you push to this branch (for migration/testing)
+  push:
+    branches: [fullstack-migration]
 
-    # Results pull: 2:05 AM Chicago (next day)
-    # 02:05 CST = 08:05 UTC (winter)
+  # scheduled runs only trigger from the repo default branch (usually main)
+  schedule:
+    - cron: "5 14 * * *"
+    - cron: "5 13 * * *"
     - cron: "5 8 * * *"
-    # 02:05 CDT = 07:05 UTC (summer)
     - cron: "5 7 * * *"
 
   workflow_dispatch:
@@ -37,11 +35,14 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      DB_PATH: data/demo_odds.sqlite
+      DB_PATH: ${{ github.workspace }}/data/demo_odds.sqlite
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # ensure we operate on the triggering branch/ref
+          ref: ${{ github.ref }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -69,14 +70,27 @@ jobs:
               exit 1
             fi
           else
+            # for push + workflow_dispatch, use the selected input (default "odds")
             echo "task=$TASK" >> $GITHUB_OUTPUT
           fi
 
       - name: Ensure data folder exists
-        run: |
-          mkdir -p data
+        run: mkdir -p data
 
-      # ODDS (8:05 AM Chicago)
+      - name: SQLite settings (CI-safe)
+        run: |
+          python - <<'PY'
+          import sqlite3, os
+          db = os.environ["DB_PATH"]
+          con = sqlite3.connect(db)
+          con.execute("PRAGMA journal_mode=DELETE;")
+          con.execute("PRAGMA synchronous=FULL;")
+          con.commit()
+          con.close()
+          print("Configured SQLite for CI:", db)
+          PY
+
+      # odds
       - name: Pull odds snapshot
         if: steps.decide.outputs.task == 'odds'
         env:
@@ -84,33 +98,84 @@ jobs:
         run: |
           python -m src.pipelines.run_odds_snapshot --sport basketball_nba --regions us --db "${DB_PATH}"
 
-      # RESULTS (2:05 AM Chicago)
+      - name: Debug DB counts (after odds)
+        if: steps.decide.outputs.task == 'odds'
+        run: |
+          python - <<'PY'
+          import os, sqlite3
+          db = os.environ["DB_PATH"]
+          con = sqlite3.connect(db)
+          cur = con.cursor()
+          tables = ["raw_moneyline_odds","raw_espn_game_results","game_id_map","fact_game_results_best_market"]
+          print("DB:", db)
+          for t in tables:
+            try:
+              n = cur.execute(f"select count(*) from {t}").fetchone()[0]
+              print(f"{t}: {n}")
+            except Exception as e:
+              print(f"{t}: (missing) {e}")
+          con.close()
+          PY
+
+      # results
       - name: Pull ESPN results (yesterday Chicago)
         if: steps.decide.outputs.task == 'results'
         run: |
           YDAY=$(TZ=America/Chicago date -d 'yesterday' +%Y%m%d)
           python -m src.pipelines.run_espn_results_pull --db "${DB_PATH}" --date "$YDAY"
 
+      - name: Debug DB counts (after results pull)
+        if: steps.decide.outputs.task == 'results'
+        run: |
+          python - <<'PY'
+          import os, sqlite3
+          db = os.environ["DB_PATH"]
+          con = sqlite3.connect(db)
+          cur = con.cursor()
+          tables = ["raw_moneyline_odds","raw_espn_game_results","game_id_map","fact_game_results_best_market"]
+          print("DB:", db)
+          for t in tables:
+            try:
+              n = cur.execute(f"select count(*) from {t}").fetchone()[0]
+              print(f"{t}: {n}")
+            except Exception as e:
+              print(f"{t}: (missing) {e}")
+          con.close()
+          PY
+
       - name: Run transforms (build fact tables)
         if: steps.decide.outputs.task == 'results'
         run: |
-          python - << 'PY'
+          python - <<'PY'
+          import os
           from src.pipelines.run_full_pipeline import run_transforms
-          run_transforms("data/demo_odds.sqlite", stake=1.0, calibration_step=0.05)
+          run_transforms(os.environ["DB_PATH"], stake=1.0, calibration_step=0.05)
           PY
 
-      # CHECKPOINT WAL -> main file and cleanup sidecars
-      - name: SQLite checkpoint + cleanup
+      - name: Debug DB counts (after transforms)
+        if: steps.decide.outputs.task == 'results'
         run: |
-          python - << 'PY'
-          import sqlite3
-          db = "data/demo_odds.sqlite"
+          python - <<'PY'
+          import os, sqlite3
+          db = os.environ["DB_PATH"]
           con = sqlite3.connect(db)
-          con.execute("PRAGMA wal_checkpoint(FULL);")
-          con.commit()
+          cur = con.cursor()
+          tables = ["raw_moneyline_odds","raw_espn_game_results","game_id_map","fact_game_results_best_market"]
+          print("DB:", db)
+          for t in tables:
+            try:
+              n = cur.execute(f"select count(*) from {t}").fetchone()[0]
+              print(f"{t}: {n}")
+            except Exception as e:
+              print(f"{t}: (missing) {e}")
           con.close()
           PY
-          rm -f "${DB_PATH}-wal" "${DB_PATH}-shm" || true
+
+      - name: Upload DB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo_odds-sqlite-${{ steps.decide.outputs.task }}
+          path: ${{ env.DB_PATH }}
 
       - name: Commit DB if changed
         run: |
@@ -130,4 +195,5 @@ jobs:
             git commit -m "chore: daily results + transforms"
           fi
 
-          git push
+          # push back to the same branch that triggered this workflow
+          git push origin HEAD:${{ github.ref_name }}
