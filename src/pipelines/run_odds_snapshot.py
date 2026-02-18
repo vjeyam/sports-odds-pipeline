@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -23,12 +24,11 @@ def run_odds_snapshot(
     regions: str = "us",
     bookmakers: Optional[str] = None,
 ) -> dict:
-    """
-    Programmatic entrypoint (used by Streamlit).
-    Returns a small summary dict for logging/diagnostics.
-    """
     load_dotenv()
     snapshot_ts = utc_now_iso()
+
+    # DATABASE_URL overrides the sqlite file path (and also allows --db to be a URL)
+    db_target = os.getenv("DATABASE_URL") or db_path
 
     r, payload = fetch_odds_moneyline(
         sport_key=sport,
@@ -38,11 +38,10 @@ def run_odds_snapshot(
     print_quota_headers(r)
 
     rows = flatten_moneyline(snapshot_ts, payload)
-    inserted = insert_raw_moneyline_rows(db_path, rows)
+    inserted = insert_raw_moneyline_rows(db_target, rows)
 
-    # Optional convenience: build these right after snapshot
-    closing_rows = build_closing_lines(db_path)
-    best_rows = build_best_market_lines(db_path)
+    closing_rows = build_closing_lines(db_target)
+    best_rows = build_best_market_lines(db_target)
 
     return {
         "snapshot_ts": snapshot_ts,
