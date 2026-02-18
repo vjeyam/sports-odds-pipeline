@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import date as date_type
+from datetime import datetime, time, timedelta, timezone
 from typing import Optional, List, Any, Dict
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
@@ -24,11 +26,13 @@ def root():
     return {"service": "sports-odds-etl-api", "health": "/health", "docs": "/docs"}
 
 
+# Request models
+
 class OddsSnapshotRequest(BaseModel):
     sport: str = "basketball_nba"
     regions: str = "us"
     bookmakers: Optional[str] = None
-    db: Optional[str] = None  # optional override; usually use DATABASE_URL
+    db: Optional[str] = None 
 
 
 class SimpleJobRequest(BaseModel):
@@ -47,10 +51,12 @@ class CalibrationRequest(BaseModel):
 
 
 class ResultsRefreshRequest(BaseModel):
-    dates: List[str]  # ["YYYY-MM-DD", ...]
+    dates: List[str]  # ["YYYY-MM-DD", ...] (Chicago local day)
     league: str = "nba"
     db: Optional[str] = None
 
+
+# Helpers
 
 def _rows_to_dicts(cur) -> List[Dict[str, Any]]:
     cols = [d[0] for d in cur.description]
@@ -60,6 +66,25 @@ def _rows_to_dicts(cur) -> List[Dict[str, Any]]:
 def _db_target(override: Optional[str]) -> Optional[str]:
     return override
 
+
+def _parse_iso_dt(s: str) -> datetime:
+    # Handles "Z" and "+00:00"
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _chicago_day_range(day: date_type) -> tuple[datetime, datetime, ZoneInfo]:
+    chi = ZoneInfo("America/Chicago")
+    start_local = datetime.combine(day, time.min).replace(tzinfo=chi)
+    end_local = start_local + timedelta(days=1)
+    return start_local, end_local, chi
+
+
+# Health endpoints
 
 @app.get("/health")
 def health():
@@ -71,19 +96,7 @@ def api_health():
     return {"ok": True}
 
 
-from datetime import datetime, time, timedelta, timezone
-from zoneinfo import ZoneInfo
-
-def _parse_iso_dt(s: str) -> datetime:
-    # Handles "Z" and "+00:00"
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    dt = datetime.fromisoformat(s)
-    # If naive, assume UTC
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt
-
+# Public endpoints for React UI
 
 @app.get("/api/games/joined")
 def api_games_joined(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)")):
@@ -92,14 +105,12 @@ def api_games_joined(date: str = Query(..., description="YYYY-MM-DD (Chicago loc
     except ValueError:
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
 
-    chi = ZoneInfo("America/Chicago")
-    start_local = datetime.combine(day, time.min).replace(tzinfo=chi)
-    end_local = start_local + timedelta(days=1)
+    start_local, end_local, chi = _chicago_day_range(day)
 
     con = connect()
     cur = con.cursor()
 
-    # Pull candidates (small table, fine). If it grows, we can optimize later.
+    # Pull all rows, filter by Chicago-local day.
     cur.execute(
         """
         SELECT
@@ -122,7 +133,7 @@ def api_games_joined(date: str = Query(..., description="YYYY-MM-DD (Chicago loc
     )
     rows = _rows_to_dicts(cur)
 
-    filtered = []
+    filtered: List[Dict[str, Any]] = []
     for r in rows:
         ct = r.get("commence_time")
         if not ct:
@@ -138,9 +149,111 @@ def api_games_joined(date: str = Query(..., description="YYYY-MM-DD (Chicago loc
     return filtered
 
 
-# Refresh endpoint for the React button
+@app.get("/games/odds")
+def games_odds(date: str = Query(..., description="YYYY-MM-DD (UTC date prefix)")):
+    try:
+        date_type.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+
+    con = connect()
+    cur = con.cursor()
+
+    sql = """
+    SELECT
+      event_id AS odds_event_id,
+      commence_time,
+      home_team,
+      away_team,
+      best_home_price_american,
+      best_away_price_american
+    FROM fact_best_market_moneyline_odds
+    WHERE commence_time LIKE ?
+    ORDER BY commence_time
+    """
+    cur.execute(sql, (f"{date}%",))
+    return _rows_to_dicts(cur)
+
+
+@app.get("/api/games/odds")
+def api_games_odds(date: str = Query(..., description="YYYY-MM-DD (UTC date prefix)")):
+    return games_odds(date)
+
+
+@app.get("/api/games")
+def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)")):
+    """
+    Unified endpoint:
+    - Always returns games (from best-market odds)
+    - Adds results if they exist (left join)
+    - Date is interpreted as Chicago local day to match UI expectations
+    """
+    try:
+        day = date_type.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+
+    start_local, end_local, chi = _chicago_day_range(day)
+
+    con = connect()
+    cur = con.cursor()
+
+    # Pull candidates by rough UTC prefix window to keep it small, then filter precisely in Python.
+    # This avoids needing timezone functions in SQLite.
+    # We fetch both the selected day and the adjacent UTC day because Chicago local day can span two UTC dates.
+    day_str = day.isoformat()
+    next_day_str = (day + timedelta(days=1)).isoformat()
+    prev_day_str = (day - timedelta(days=1)).isoformat()
+
+    sql = """
+    SELECT
+      o.event_id AS odds_event_id,
+      o.commence_time,
+      o.home_team,
+      o.away_team,
+      o.best_home_price_american,
+      o.best_away_price_american,
+
+      r.home_score,
+      r.away_score,
+
+      CASE
+        WHEN r.home_score > r.away_score THEN 'home'
+        WHEN r.away_score > r.home_score THEN 'away'
+        ELSE NULL
+      END AS winner
+
+    FROM fact_best_market_moneyline_odds o
+    LEFT JOIN game_id_map m
+      ON o.event_id = m.odds_event_id
+    LEFT JOIN raw_espn_game_results r
+      ON m.espn_event_id = r.espn_event_id
+
+    WHERE o.commence_time LIKE ? OR o.commence_time LIKE ? OR o.commence_time LIKE ?
+    ORDER BY o.commence_time
+    """
+    cur.execute(sql, (f"{prev_day_str}%", f"{day_str}%", f"{next_day_str}%"))
+    rows = _rows_to_dicts(cur)
+
+    filtered: List[Dict[str, Any]] = []
+    for r in rows:
+        ct = r.get("commence_time")
+        if not ct:
+            continue
+        try:
+            dt_utc = _parse_iso_dt(ct)
+            dt_local = dt_utc.astimezone(chi)
+        except Exception:
+            continue
+        if start_local <= dt_local < end_local:
+            filtered.append(r)
+
+    return filtered
+
+
 @app.post("/api/etl/results-refresh")
 def api_results_refresh(req: ResultsRefreshRequest):
+    # Convert Chicago ISO dates -> ESPN scoreboard YYYYMMDD
     yyyymmdd: List[str] = []
     for d in req.dates:
         try:
@@ -161,6 +274,8 @@ def api_results_refresh(req: ResultsRefreshRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# Jobs (internal/ops)
 
 @app.post("/jobs/odds-snapshot")
 def job_odds_snapshot(req: OddsSnapshotRequest):
@@ -232,75 +347,3 @@ def job_build_calibration_favorite(req: CalibrationRequest):
         return {"calibration_rows": n}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/games/odds")
-def api_games_odds(date: str):
-    try:
-        date_type.fromisoformat(date)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
-
-    con = connect()
-    cur = con.cursor()
-
-    sql = """
-    SELECT
-      event_id as odds_event_id,
-      commence_time,
-      home_team,
-      away_team,
-      best_home_price_american,
-      best_away_price_american
-    FROM fact_best_market_moneyline_odds
-    WHERE commence_time LIKE ?
-    ORDER BY commence_time
-    """
-    cur.execute(sql, (f"{date}%",))
-    return _rows_to_dicts(cur)
-
-
-@app.get("/api/games/odds")
-def api_games_odds_alias(date: str):
-    return api_games_odds(date)
-
-
-@app.get("/api/games")
-def api_games(date: str = Query(..., description="YYYY-MM-DD (UTC date prefix)")):
-    try:
-        date_type.fromisoformat(date)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
-
-    con = connect()
-    cur = con.cursor()
-
-    sql = """
-    SELECT
-      o.event_id AS odds_event_id,
-      o.commence_time,
-      o.home_team,
-      o.away_team,
-      o.best_home_price_american,
-      o.best_away_price_american,
-
-      r.home_score,
-      r.away_score,
-
-      CASE
-        WHEN r.home_score > r.away_score THEN 'home'
-        WHEN r.away_score > r.home_score THEN 'away'
-        ELSE NULL
-      END AS winner
-
-    FROM fact_best_market_moneyline_odds o
-    LEFT JOIN game_id_map m
-      ON o.event_id = m.odds_event_id
-    LEFT JOIN raw_espn_game_results r
-      ON m.espn_event_id = r.espn_event_id
-
-    WHERE o.commence_time LIKE ?
-    ORDER BY o.commence_time
-    """
-    cur.execute(sql, (f"{date}%",))
-    return _rows_to_dicts(cur)

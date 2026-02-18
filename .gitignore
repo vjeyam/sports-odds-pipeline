@@ -11,3 +11,6 @@ java-api/.gradle
 test.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Ignore npm packages
+node_modules/

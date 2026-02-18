@@ -1,0 +1,10 @@
+{
+  "name": "sports-odds-fullstack",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n API,WEB \"python -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000\" \"npm --prefix web run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
