@@ -1,6 +1,32 @@
 import { useEffect, useState } from "react";
+import { getGames, refreshResults, type GameRow } from "./lib/api";
 import "./App.css";
-import { getJoinedGames, refreshResults, type JoinedGameRow } from "./lib/api";
+
+function fmtScore(a: number | null, h: number | null) {
+  if (a == null || h == null) return "—";
+  return `${a} - ${h}`;
+}
+
+function status(row: GameRow) {
+  return row.home_score == null || row.away_score == null ? "Scheduled" : "Final";
+}
+
+function fmtML(x: number | null) {
+  if (x == null) return "—";
+  return x > 0 ? `+${x}` : `${x}`;
+}
+
+function fmtTime(iso: string | null) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function todayISO(): string {
   const d = new Date();
@@ -10,15 +36,9 @@ function todayISO(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function fmtTime(s: string | null): string {
-  if (!s) return "";
-  // keep it simple; you can prettify later
-  return s.replace("T", " ").replace("Z", "");
-}
-
 export default function App() {
   const [date, setDate] = useState(todayISO());
-  const [rows, setRows] = useState<JoinedGameRow[]>([]);
+  const [rows, setRows] = useState<GameRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +47,7 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getJoinedGames(date);
+      const data = await getGames(date);
       setRows(data);
     } catch (e) {
       setRows([]);
@@ -42,7 +62,7 @@ export default function App() {
     setError(null);
     try {
       await refreshResults([date]);
-      await load(); // reload table after ETL refresh
+      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -50,10 +70,20 @@ export default function App() {
     }
   }
 
-  useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [date]);
+  useEffect(() => { void load(); }, [date]);
+
+  const th: React.CSSProperties = {
+    textAlign: "left",
+    borderBottom: "1px solid #ddd",
+    padding: 8,
+    whiteSpace: "nowrap",
+  };
+
+  const td: React.CSSProperties = {
+    borderBottom: "1px solid #f0f0f0",
+    padding: 8,
+    whiteSpace: "nowrap",
+  };
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}>
@@ -74,6 +104,7 @@ export default function App() {
           onClick={onRefreshResults}
           disabled={loading || refreshing}
           style={{ padding: "10px 14px" }}
+          title="Runs results ETL for the selected date"
         >
           {refreshing ? "Refreshing..." : "Refresh Results"}
         </button>
@@ -97,54 +128,74 @@ export default function App() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
-                Time
-              </th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
-                Away
-              </th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
-                Home
-              </th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
-                Away ML
-              </th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
-                Home ML
-              </th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
-                Score
-              </th>
-              <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>
-                Winner
-              </th>
+              <th style={th}>Time (CT)</th>
+              <th style={th}>Away</th>
+              <th style={th}>Home</th>
+              <th style={th}>Away ML</th>
+              <th style={th}>Home ML</th>
+              <th style={th}>Score</th>
+              <th style={th}>Winner</th>
+              <th style={th}>Status</th>
             </tr>
           </thead>
+
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.odds_event_id}>
-                <td style={{ borderBottom: "1px solid #f0f0f0", padding: 8 }}>
-                  {fmtTime(r.commence_time)}
-                </td>
-                <td style={{ borderBottom: "1px solid #f0f0f0", padding: 8 }}>{r.away_team}</td>
-                <td style={{ borderBottom: "1px solid #f0f0f0", padding: 8 }}>{r.home_team}</td>
-                <td style={{ borderBottom: "1px solid #f0f0f0", padding: 8 }}>
-                  {r.best_away_price_american ?? ""}
-                </td>
-                <td style={{ borderBottom: "1px solid #f0f0f0", padding: 8 }}>
-                  {r.best_home_price_american ?? ""}
-                </td>
-                <td style={{ borderBottom: "1px solid #f0f0f0", padding: 8 }}>
-                  {r.away_score ?? ""}{r.away_score != null || r.home_score != null ? " - " : ""}
-                  {r.home_score ?? ""}
-                </td>
-                <td style={{ borderBottom: "1px solid #f0f0f0", padding: 8 }}>{r.winner ?? ""}</td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const isFinal = r.home_score != null && r.away_score != null;
+              const homeWon = r.winner === "home";
+              const awayWon = r.winner === "away";
+
+              return (
+                <tr
+                  key={r.odds_event_id}
+                  style={{
+                    backgroundColor: isFinal ? "rgba(0, 255, 120, 0.04)" : undefined,
+                    transition: "background 0.2s ease",
+                  }}
+                >
+                  <td style={td}>{fmtTime(r.commence_time)}</td>
+
+                  <td
+                    style={{
+                      ...td,
+                      fontWeight: awayWon ? 600 : 400,
+                    }}
+                  >
+                    {r.away_team ?? "—"}
+                  </td>
+
+                  <td
+                    style={{
+                      ...td,
+                      fontWeight: homeWon ? 600 : 400,
+                    }}
+                  >
+                    {r.home_team ?? "—"}
+                  </td>
+
+                  <td style={td}>{fmtML(r.best_away_price_american)}</td>
+                  <td style={td}>{fmtML(r.best_home_price_american)}</td>
+
+                  <td style={td}>{fmtScore(r.away_score, r.home_score)}</td>
+
+                  <td
+                    style={{
+                      ...td,
+                      fontWeight: isFinal ? 600 : 400,
+                      color: isFinal ? "#4ade80" : undefined,
+                    }}
+                  >
+                    {r.winner ?? "—"}
+                  </td>
+
+                  <td style={td}>{status(r)}</td>
+                </tr>
+              );
+            })}
 
             {!loading && rows.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ padding: 12, opacity: 0.8 }}>
+                <td colSpan={8} style={{ padding: 12, opacity: 0.8 }}>
                   No games returned for {date}. Try a different date or run “Refresh Results”.
                 </td>
               </tr>

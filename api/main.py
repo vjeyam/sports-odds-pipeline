@@ -263,3 +263,44 @@ def api_games_odds(date: str):
 @app.get("/api/games/odds")
 def api_games_odds_alias(date: str):
     return api_games_odds(date)
+
+
+@app.get("/api/games")
+def api_games(date: str = Query(..., description="YYYY-MM-DD (UTC date prefix)")):
+    try:
+        date_type.fromisoformat(date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+
+    con = connect()
+    cur = con.cursor()
+
+    sql = """
+    SELECT
+      o.event_id AS odds_event_id,
+      o.commence_time,
+      o.home_team,
+      o.away_team,
+      o.best_home_price_american,
+      o.best_away_price_american,
+
+      r.home_score,
+      r.away_score,
+
+      CASE
+        WHEN r.home_score > r.away_score THEN 'home'
+        WHEN r.away_score > r.home_score THEN 'away'
+        ELSE NULL
+      END AS winner
+
+    FROM fact_best_market_moneyline_odds o
+    LEFT JOIN game_id_map m
+      ON o.event_id = m.odds_event_id
+    LEFT JOIN raw_espn_game_results r
+      ON m.espn_event_id = r.espn_event_id
+
+    WHERE o.commence_time LIKE ?
+    ORDER BY o.commence_time
+    """
+    cur.execute(sql, (f"{date}%",))
+    return _rows_to_dicts(cur)
