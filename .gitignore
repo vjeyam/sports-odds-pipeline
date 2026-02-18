@@ -8,9 +8,12 @@ java-api/.gradle
 .env
 
 # Ignore SQLite database files
-test.sqlite
-*.sqlite-shm
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
+*.sqlite
 *.sqlite-wal
+*.sqlite-shm
 
 # Ignore npm packages
 node_modules/
