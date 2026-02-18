@@ -1,4 +1,14 @@
+from __future__ import annotations
+
+import os
 import sqlite3
+from typing import Any, Protocol, runtime_checkable, Optional
+
+try:
+    import psycopg  # type: ignore
+except Exception:  # pragma: no cover
+    psycopg = None  # allows sqlite-only installs
+
 
 DDL = """
 -- One row per (snapshot, game, sportsbook, market, outcome)
@@ -160,14 +170,60 @@ CREATE TABLE IF NOT EXISTS fact_dashboard_kpis (
 );
 """
 
-def connect(db_path: str) -> sqlite3.Connection:
-    """Open a SQLite connection with pragmatic defaults for ETL."""
-    conn = sqlite3.connect(db_path)
+
+def _is_postgres_target(target: str) -> bool:
+    t = (target or "").strip().lower()
+    return t.startswith("postgres://") or t.startswith("postgresql://")
+
+
+def connect(db_path_or_url: Optional[str] = None):
+    """
+    Connect to SQLite (path) or Postgres (URL).
+
+    - If db_path_or_url is None, uses env DATABASE_URL if set, else falls back to data/demo_odds.sqlite.
+    - SQLite: pass a filesystem path like "data/demo_odds.sqlite"
+    - Postgres: pass a URL like "postgresql://user:pass@localhost:5432/dbname"
+    """
+    target = db_path_or_url or os.getenv("DATABASE_URL") or "data/demo_odds.sqlite"
+
+    if _is_postgres_target(target):
+        if psycopg is None:
+            raise RuntimeError(
+                "Postgres DATABASE_URL provided but psycopg is not installed. "
+                "Add 'psycopg[binary]' to requirements.txt."
+            )
+        conn = psycopg.connect(target)  # type: ignore
+        # Important: most of your ETL does inserts/updates; autocommit off is fine.
+        return conn
+
+    # SQLite path
+    conn = sqlite3.connect(target)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create required tables if they don't exist."""
-    conn.executescript(DDL)
-    conn.commit()
+
+def ensure_schema(conn) -> None:
+    """
+    Create required tables if they don't exist (SQLite or Postgres).
+    """
+    module = conn.__class__.__module__
+    is_sqlite = module.startswith("sqlite3")
+    is_postgres = module.startswith("psycopg")
+
+    if is_sqlite:
+        conn.executescript(DDL)
+        conn.commit()
+        return
+
+    if is_postgres:
+        # psycopg doesn't have executescript; run statements one-by-one.
+        # This simplistic split works because your DDL statements end in semicolons and don't contain functions.
+        statements = [s.strip() for s in DDL.split(";") if s.strip()]
+        with conn.cursor() as cur:
+            for stmt in statements:
+                cur.execute(stmt)
+        conn.commit()
+        return
+
+    raise TypeError(f"Unsupported connection type: {type(conn)}")
