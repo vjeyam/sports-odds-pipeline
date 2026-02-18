@@ -1,0 +1,14 @@
+server:
+  port: 8080
+
+python:
+  base-url: ${PYTHON_API_BASE_URL:http://python-api:8000}
+
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://db:5432/odds}
+    username: ${SPRING_DATASOURCE_USERNAME:odds}
+    password: ${SPRING_DATASOURCE_PASSWORD:odds}
+  sql:
+    init:
+      mode: never

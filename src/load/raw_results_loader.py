@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 from src.db import connect, ensure_schema
 
 
+def _is_postgres(conn) -> bool:
+    return conn.__class__.__module__.startswith("psycopg")
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -97,10 +101,39 @@ def flatten_espn_scoreboard(scoreboard_date: str, payload: Dict[str, Any], leagu
     return rows
 
 
-def upsert_raw_espn_results(db_path: str, rows: List[Tuple]) -> int:
-    conn = connect(db_path)
+def upsert_raw_espn_results(db_target: str | None, rows: List[Tuple]) -> int:
+    conn = connect(db_target)
     ensure_schema(conn)
 
+    is_pg = _is_postgres(conn)
+
+    if is_pg:
+        sql = """
+        INSERT INTO raw_espn_game_results (
+          scoreboard_date, espn_event_id, league, pulled_ts,
+          start_time, status, completed,
+          home_team, away_team, home_score, away_score
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (scoreboard_date, espn_event_id)
+        DO UPDATE SET
+          league = EXCLUDED.league,
+          pulled_ts = EXCLUDED.pulled_ts,
+          start_time = EXCLUDED.start_time,
+          status = EXCLUDED.status,
+          completed = EXCLUDED.completed,
+          home_team = EXCLUDED.home_team,
+          away_team = EXCLUDED.away_team,
+          home_score = EXCLUDED.home_score,
+          away_score = EXCLUDED.away_score
+        """
+        with conn.cursor() as cur:
+            cur.executemany(sql, rows)
+        conn.commit()
+        conn.close()
+        return len(rows)
+
+    # SQLite
     sql = """
     INSERT OR REPLACE INTO raw_espn_game_results (
       scoreboard_date, espn_event_id, league, pulled_ts,
@@ -109,13 +142,9 @@ def upsert_raw_espn_results(db_path: str, rows: List[Tuple]) -> int:
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
-
     cursor = conn.cursor()
     cursor.executemany(sql, rows)
     conn.commit()
-    
-    # Recount rows after upsert
     num = cursor.rowcount
     conn.close()
-    
     return num

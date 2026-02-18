@@ -20,7 +20,7 @@ def default_dates() -> list[str]:
 
 def run_espn_results_pull(
     *,
-    db_path: str = "odds.sqlite",
+    db_path: str | None = None,
     dates: Optional[Sequence[str]] = None,
     league: str = "nba",
 ) -> dict:
@@ -45,7 +45,7 @@ def run_espn_results_pull(
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", default="odds.sqlite")
+    ap.add_argument("--db", default=None)
     ap.add_argument("--date", action="append", help="YYYYMMDD (repeatable). If omitted, pulls yesterday+today.")
     args = ap.parse_args()
 
