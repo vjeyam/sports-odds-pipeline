@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import os
+import traceback
+
 from datetime import date as date_type
 from datetime import datetime, time, timedelta, timezone
 from typing import Optional, List, Any, Dict, Tuple
 from zoneinfo import ZoneInfo
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
@@ -17,8 +21,14 @@ from src.transform.build_game_id_map import build_game_id_map
 from src.transform.build_fact_game_results_best_market import build_fact_game_results_best_market
 from src.transform.build_calibration_favorite import build_calibration_favorite
 
+load_dotenv()
+
 app = FastAPI(title="Sports Odds ETL API", version="0.1.0")
 
+print("ENV CHECK:", {
+    "ODDS_API_KEY": bool(os.getenv("ODDS_API_KEY")),
+    "DATABASE_URL": os.getenv("DATABASE_URL"),
+})
 
 @app.get("/")
 def root():
@@ -54,14 +64,21 @@ class ResultsRefreshRequest(BaseModel):
     db: Optional[str] = None
 
 
+class OddsRefreshRequest(BaseModel):
+    sport: str = "basketball_nba"
+    regions: str = "us"
+    bookmakers: Optional[str] = None
+    db: Optional[str] = None
+
+
 # Helpers
 def _rows_to_dicts(cur) -> List[Dict[str, Any]]:
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def _db_target(override: Optional[str]) -> Optional[str]:
-    return override
+def _db_target(override: Optional[str]) -> str:
+    return override or os.getenv("DATABASE_URL") or "odds.sqlite"
 
 
 def _parse_iso_dt(s: str) -> datetime:
@@ -207,37 +224,58 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
 
     sql = """
     SELECT
-      o.event_id AS odds_event_id,
-      o.commence_time,
-      o.home_team,
-      o.away_team,
-      o.best_home_price_american,
-      o.best_away_price_american,
+        o.event_id AS odds_event_id,
+        o.commence_time,
+        o.home_team,
+        o.away_team,
+        o.best_home_price_american,
+        o.best_away_price_american,
 
-      CASE WHEN r.completed = 1 THEN r.home_score ELSE NULL END AS home_score,
-      CASE WHEN r.completed = 1 THEN r.away_score ELSE NULL END AS away_score,
+        r.status AS status,
+        r.completed AS completed,
+        r.start_time AS start_time,
 
-      CASE
-        WHEN r.completed = 1 AND r.home_score > r.away_score THEN 'home'
-        WHEN r.completed = 1 AND r.away_score > r.home_score THEN 'away'
-        ELSE NULL
-      END AS winner
+        CASE
+            WHEN r.completed = 1 OR r.status = 'In Progress' THEN r.home_score
+            ELSE NULL
+        END AS home_score,
+
+        CASE
+            WHEN r.completed = 1 OR r.status = 'In Progress' THEN r.away_score
+            ELSE NULL
+        END AS away_score,
+
+        CASE
+            WHEN r.completed = 1 AND r.home_score > r.away_score THEN o.home_team
+            WHEN r.completed = 1 AND r.away_score > r.home_score THEN o.away_team
+            ELSE NULL
+        END AS winner
 
     FROM fact_best_market_moneyline_odds o
-    LEFT JOIN game_id_map m
-      ON o.event_id = m.odds_event_id
-    LEFT JOIN raw_espn_game_results r
-      ON m.espn_event_id = r.espn_event_id
+    LEFT JOIN game_id_map m ON o.event_id = m.odds_event_id
+    LEFT JOIN (
+    SELECT r1.*
+    FROM raw_espn_game_results r1
+    JOIN (
+        SELECT espn_event_id, MAX(pulled_ts) AS max_pulled_ts
+        FROM raw_espn_game_results
+        GROUP BY espn_event_id
+    ) latest
+        ON r1.espn_event_id = latest.espn_event_id
+    AND r1.pulled_ts = latest.max_pulled_ts
+    ) r
+    ON m.espn_event_id = r.espn_event_id
 
-    WHERE
-      o.commence_time LIKE ?
-      OR o.commence_time LIKE ?
-      OR o.commence_time LIKE ?
-
+    WHERE o.commence_time LIKE ? OR o.commence_time LIKE ? OR o.commence_time LIKE ?
     ORDER BY o.commence_time
     """
 
-    cur.execute(sql, (f"{prev_day_str}%", f"{day_str}%", f"{next_day_str}%"))
+    try:
+        cur.execute(sql, (f"{prev_day_str}%", f"{day_str}%", f"{next_day_str}%"))
+    except Exception as e:
+        print("SQL ERROR:", e)
+        raise
+    
     rows = _rows_to_dicts(cur)
 
     filtered: List[Dict[str, Any]] = []
@@ -273,8 +311,13 @@ def api_results_refresh(req: ResultsRefreshRequest):
         yyyymmdd.append(dt.strftime("%Y%m%d"))
 
     try:
+        # pull_summary = run_espn_results_pull(
+        #     db_path=req.db or None,
+        #     dates=yyyymmdd,
+        #     league=req.league,
+        # )
         pull_summary = run_espn_results_pull(
-            db_path=req.db or None,
+            db_path=req.db,
             dates=yyyymmdd,
             league=req.league,
         )
@@ -282,6 +325,37 @@ def api_results_refresh(req: ResultsRefreshRequest):
         fact_rows = build_fact_game_results_best_market(_db_target(req.db))
         return {"pull": pull_summary, "mapped": mapped, "fact_rows": fact_rows}
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/etl/odds-refresh")
+def api_odds_refresh(req: OddsRefreshRequest):
+    try:
+        db_path = _db_target(req.db)
+
+        snap = run_odds_snapshot(
+            db_path=db_path,
+            sport=req.sport,
+            regions=req.regions,
+            bookmakers=req.bookmakers,
+        )
+
+        best = build_best_market_lines(db_path)
+        closing = build_closing_lines(db_path)
+        mapped = build_game_id_map(db_path)
+        fact_rows = build_fact_game_results_best_market(db_path)
+
+        return {
+            "ok": True,
+            "odds_snapshot": snap,
+            "best_market_rows": best,
+            "closing_rows": closing,
+            "mapped_rows": mapped,
+            "fact_rows": fact_rows,
+        }
+    except Exception as e:
+        print("ODDS REFRESH ERROR:", repr(e))
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 

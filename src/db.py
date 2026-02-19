@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from typing import Any, Protocol, runtime_checkable, Optional
+from urllib.parse import urlparse, unquote
 
 try:
     import psycopg  # type: ignore
@@ -176,6 +177,42 @@ def _is_postgres_target(target: str) -> bool:
     return t.startswith("postgres://") or t.startswith("postgresql://")
 
 
+def _sqlite_path_from_target(target: str) -> str:
+    """
+    Convert SQLite targets into a filesystem path usable by sqlite3.connect().
+
+    Supports:
+      - "sqlite:///data/demo_odds.sqlite"  (URL form)
+      - "data/demo_odds.sqlite"           (path form)
+      - "/abs/path/demo_odds.sqlite"      (absolute path)
+    """
+    t = (target or "").strip()
+
+    if t.lower().startswith("sqlite:"):
+        u = urlparse(t)
+        path = unquote(u.path or "")
+
+        # Common .env style: sqlite:///data/demo_odds.sqlite
+        # urlparse makes path="/data/demo_odds.sqlite" — we want repo-relative "data/demo_odds.sqlite"
+        if path.startswith("/"):
+            path = path[1:]
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        t = os.path.join(repo_root, path)
+
+    # If still relative, resolve relative to repo root
+    if not os.path.isabs(t):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        t = os.path.join(repo_root, t)
+
+    # Ensure parent directory exists
+    parent = os.path.dirname(os.path.abspath(t))
+    if parent and not os.path.exists(parent):
+        os.makedirs(parent, exist_ok=True)
+
+    return t
+
+
 def connect(db_path_or_url: Optional[str] = None):
     """
     Connect to SQLite (path) or Postgres (URL).
@@ -196,8 +233,9 @@ def connect(db_path_or_url: Optional[str] = None):
         # Important: most of your ETL does inserts/updates; autocommit off is fine.
         return conn
 
-    # SQLite path
-    conn = sqlite3.connect(target)
+    # SQLite path (or sqlite URL)
+    sqlite_path = _sqlite_path_from_target(target)
+    conn = sqlite3.connect(sqlite_path)
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn

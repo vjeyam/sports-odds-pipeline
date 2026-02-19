@@ -1,15 +1,14 @@
 import { useEffect, useState } from "react";
-import { getGames, refreshResults, type GameRow } from "./lib/api";
+import { getGames, refreshResults, refreshOdds, type GameRow } from "./lib/api";
 import "./App.css";
 
-function fmtScore(a: number | null, h: number | null) {
-  if (a == null || h == null) return "—";
-  return `${a} - ${h}`;
+function fmtScore(away: number | null, home: number | null) {
+  if (away == null || home == null) return "—";
+  return `${away} - ${home}`;
 }
 
-function status(row: GameRow) {
-  if (row.home_score == null || row.away_score == null) return "Scheduled";
-  return "Final";
+function statusLabel(row: GameRow) {
+  return row.status ?? "Scheduled";
 }
 
 function fmtML(x: number | null) {
@@ -43,6 +42,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [oddsRefreshing, setOddsRefreshing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -68,6 +68,18 @@ export default function App() {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function onRefreshOdds() {
+    try {
+      setOddsRefreshing(true);
+      await refreshOdds();
+      await load();
+    } catch (e: any) {
+      alert(`Error refreshing odds: ${e?.message ?? e}`);
+    } finally {
+      setOddsRefreshing(false);
     }
   }
 
@@ -110,6 +122,10 @@ export default function App() {
           {refreshing ? "Refreshing..." : "Refresh Results"}
         </button>
 
+        <button onClick={onRefreshOdds} disabled={oddsRefreshing}>
+          {oddsRefreshing ? "Refreshing Odds..." : "Refresh Odds"}
+        </button>
+
         <button onClick={load} disabled={loading || refreshing} style={{ padding: "10px 14px" }}>
           {loading ? "Loading..." : "Reload"}
         </button>
@@ -142,65 +158,26 @@ export default function App() {
 
           <tbody>
             {rows.map((r) => {
-              const isFinal = r.home_score != null && r.away_score != null && !(r.home_score === 0 && r.away_score === 0);
-              const homeWon = r.winner === "home";
-              const awayWon = r.winner === "away";
+              const isFinal = r.completed === 1;
+              const timeToShow = r.start_time ?? r.commence_time;
 
               return (
-                <tr
-                  key={r.odds_event_id}
-                  style={{
-                    backgroundColor: isFinal ? "rgba(0, 255, 120, 0.04)" : undefined,
-                    transition: "background 0.2s ease",
-                  }}
-                >
-                  <td style={td}>{fmtTime(r.commence_time)}</td>
-
-                  <td
-                    style={{
-                      ...td,
-                      fontWeight: awayWon ? 600 : 400,
-                    }}
-                  >
-                    {r.away_team ?? "—"}
-                  </td>
-
-                  <td
-                    style={{
-                      ...td,
-                      fontWeight: homeWon ? 600 : 400,
-                    }}
-                  >
-                    {r.home_team ?? "—"}
-                  </td>
-
+                <tr key={r.odds_event_id}>
+                  <td style={td}>{fmtTime(timeToShow)}</td>
+                  <td style={td}>{r.away_team ?? "—"}</td>
+                  <td style={td}>{r.home_team ?? "—"}</td>
                   <td style={td}>{fmtML(r.best_away_price_american)}</td>
                   <td style={td}>{fmtML(r.best_home_price_american)}</td>
-
                   <td style={td}>{fmtScore(r.away_score, r.home_score)}</td>
 
-                  <td
-                    style={{
-                      ...td,
-                      fontWeight: isFinal ? 600 : 400,
-                      color: isFinal ? "#4ade80" : undefined,
-                    }}
-                  >
-                    {r.winner ?? "—"}
-                  </td>
+                  {/* winner only when completed */}
+                  <td style={td}>{isFinal ? (r.winner ?? "—") : "—"}</td>
 
-                  <td style={td}>{status(r)}</td>
+                  {/* use backend-provided status */}
+                  <td style={td}>{statusLabel(r)}</td>
                 </tr>
               );
             })}
-
-            {!loading && rows.length === 0 && (
-              <tr>
-                <td colSpan={8} style={{ padding: 12, opacity: 0.8 }}>
-                  No games returned for {date}. Try a different date or run “Refresh Results”.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>

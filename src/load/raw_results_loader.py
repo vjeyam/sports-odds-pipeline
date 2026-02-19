@@ -63,25 +63,34 @@ def flatten_espn_scoreboard(scoreboard_date: str, payload: Dict[str, Any], leagu
         # Status / completed
         status_type = ((ev.get("status") or {}).get("type")) or {}
 
-        status_text = (
+        # ESPN canonical: "pre" | "in" | "post"
+        state = status_type.get("state")
+
+        detail = (
             status_type.get("shortDetail")
             or status_type.get("detail")
             or status_type.get("description")
-            or status_type.get("state")
         )
 
         completed_val = status_type.get("completed")
         completed = 1 if completed_val in (True, "true", "True", 1, "1") else 0
 
-        # Extra fallbacks: ESPN often uses state="post" for completed games
-        state = status_type.get("state")
+        # ESPN often uses state="post" for completed games
         if completed == 0 and state == "post":
             completed = 1
 
-        # If text contains "Final", treat as completed
-        if completed == 0 and isinstance(status_text, str) and "final" in status_text.lower():
+        # fallback if text contains "Final"
+        if completed == 0 and isinstance(detail, str) and "final" in detail.lower():
             completed = 1
 
+        # stable bucketed status (what API/UI should use)
+        if completed == 1 or state == "post":
+            status: str = "Final"
+        elif state == "in":
+            status: str = "In Progress"
+        else:
+            status: str = "Scheduled"
+        
         rows.append(
             (
                 scoreboard_date,
@@ -89,7 +98,7 @@ def flatten_espn_scoreboard(scoreboard_date: str, payload: Dict[str, Any], leagu
                 league,
                 pulled_ts,
                 start_time,
-                status_text,
+                status,
                 completed,
                 home_team,
                 away_team,
