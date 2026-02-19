@@ -1,11 +1,22 @@
+# Notes (commit messages and what to work on)
+notes.txt
+
 # Ignore Python bytecode files and virtual environment
 __pycache__/
 .vscode
 .DS_Store
+java-api/.gradle
 
 # Ignore environment variables
 .env
 
 # Ignore SQLite database files
-*.sqlite-shm
+data/*.sqlite
+data/*.sqlite-wal
+data/*.sqlite-shm
+*.sqlite
 *.sqlite-wal
+*.sqlite-shm
+
+# Ignore npm packages
+node_modules/

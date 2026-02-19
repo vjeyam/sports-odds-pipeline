@@ -1,11 +1,24 @@
+from __future__ import annotations
+
 from src.db import connect, ensure_schema
 
 
-def build_fact_game_results_best_market(db_path: str) -> int:
-    conn = connect(db_path)
+def _is_postgres(conn) -> bool:
+    return conn.__class__.__module__.startswith("psycopg")
+
+
+def build_fact_game_results_best_market(db_target: str | None = None) -> int:
+    conn = connect(db_target)
     ensure_schema(conn)
 
-    conn.execute("DELETE FROM fact_game_results_best_market")
+    is_pg = _is_postgres(conn)
+
+    # Clear table
+    if is_pg:
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE fact_game_results_best_market;")
+    else:
+        conn.execute("DELETE FROM fact_game_results_best_market")
 
     sql = """
     INSERT INTO fact_game_results_best_market (
@@ -54,21 +67,27 @@ def build_fact_game_results_best_market(db_path: str) -> int:
       ON o.event_id = m.odds_event_id
     JOIN raw_espn_game_results r
       ON m.espn_event_id = r.espn_event_id
-    WHERE r.completed = 1
     ;
     """
 
+    if is_pg:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM fact_game_results_best_market")
+            count = int(cur.fetchone()[0])
+        conn.close()
+        return count
+
+    # SQLite
     conn.execute(sql)
     conn.commit()
-
-    count = conn.execute(
-        "SELECT COUNT(*) FROM fact_game_results_best_market"
-    ).fetchone()[0]
-
+    count = conn.execute("SELECT COUNT(*) FROM fact_game_results_best_market").fetchone()[0]
     conn.close()
-    return count
+    return int(count)
 
 
 if __name__ == "__main__":
-    n = build_fact_game_results_best_market("odds.sqlite")
+    n = build_fact_game_results_best_market()
     print("fact_rows:", n)

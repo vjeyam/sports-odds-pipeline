@@ -1,0 +1,56 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: odds-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: odds
+      POSTGRES_PASSWORD: odds
+      POSTGRES_DB: odds
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odds -d odds"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  
+  python-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://odds:odds@db:5432/odds
+      # If you use .env locally, you can also pass ODDS_API_KEY here or via env_file:
+      # ODDS_API_KEY: ${ODDS_API_KEY}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+  
+  java-api:
+    build:
+      context: .
+      dockerfile: java-api/Dockerfile
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/odds
+      SPRING_DATASOURCE_USERNAME: odds
+      SPRING_DATASOURCE_PASSWORD: odds
+      PYTHON_API_BASE_URL: http://python-api:8000
+    depends_on:
+      db:
+        condition: service_healthy
+      python-api:
+        condition: service_started
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

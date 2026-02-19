@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
+
+# NOTE:
+# - Do NOT raise missing env var errors at import time (breaks API startup).
+# - Load .env in a way that works both for CLI runs and uvicorn reload.
+_ENV_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+load_dotenv(dotenv_path=_ENV_PATH)
+
 
 from src.extract.odds_api import fetch_odds_moneyline, print_quota_headers
 from src.load.raw_odds_loader import flatten_moneyline, insert_raw_moneyline_rows
@@ -16,19 +24,31 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _get_odds_api_key() -> str:
+    # Reload env in case caller started process without env loaded.
+    # (No harm if already loaded.)
+    load_dotenv(dotenv_path=_ENV_PATH, override=False)
+
+    api_key = os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing ODDS_API_KEY (or THE_ODDS_API_KEY) in environment")
+    return api_key
+
+
 def run_odds_snapshot(
     *,
-    db_path: str = "odds.sqlite",
+    db_path: str | None = None,
     sport: str = "basketball_nba",
     regions: str = "us",
     bookmakers: Optional[str] = None,
 ) -> dict:
-    """
-    Programmatic entrypoint (used by Streamlit).
-    Returns a small summary dict for logging/diagnostics.
-    """
-    load_dotenv()
     snapshot_ts = utc_now_iso()
+
+    # Ensure key exists (and fail only when this function is called)
+    _ = _get_odds_api_key()
+
+    # DATABASE_URL overrides the sqlite file path (and also allows --db to be a URL)
+    db_target = os.getenv("DATABASE_URL") or db_path or "odds.sqlite"
 
     r, payload = fetch_odds_moneyline(
         sport_key=sport,
@@ -38,11 +58,9 @@ def run_odds_snapshot(
     print_quota_headers(r)
 
     rows = flatten_moneyline(snapshot_ts, payload)
-    inserted = insert_raw_moneyline_rows(db_path, rows)
-
-    # Optional convenience: build these right after snapshot
-    closing_rows = build_closing_lines(db_path)
-    best_rows = build_best_market_lines(db_path)
+    inserted = insert_raw_moneyline_rows(db_target, rows)
+    closing_rows = build_closing_lines(db_target)
+    best_rows = build_best_market_lines(db_target)
 
     return {
         "snapshot_ts": snapshot_ts,

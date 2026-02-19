@@ -6,6 +6,10 @@ from typing import List, Tuple
 from src.db import connect, ensure_schema
 
 
+def _is_postgres(conn) -> bool:
+    return conn.__class__.__module__.startswith("psycopg")
+
+
 def american_to_implied_prob(odds: int) -> float:
     """
     Convert American odds to implied probability (no vig removal).
@@ -31,12 +35,14 @@ def make_buckets(step: float = 0.05, lo: float = 0.50, hi: float = 1.00) -> List
     return buckets
 
 
-def build_calibration_favorite(db_path: str, step: float = 0.05) -> int:
-    conn = connect(db_path)
+def build_calibration_favorite(db_target: str | None = None, step: float = 0.05) -> int:
+    conn = connect(db_target)
     ensure_schema(conn)
 
+    is_pg = _is_postgres(conn)
+
     # Pull joined fact rows
-    rows = conn.execute("""
+    select_sql = """
       SELECT
         winner,
         favorite_side,
@@ -47,10 +53,17 @@ def build_calibration_favorite(db_path: str, step: float = 0.05) -> int:
         AND favorite_side IN ('home', 'away')
         AND best_home_price_american IS NOT NULL
         AND best_away_price_american IS NOT NULL
-    """).fetchall()
+    """
+
+    if is_pg:
+        with conn.cursor() as cur:
+            cur.execute(select_sql)
+            rows = cur.fetchall()
+    else:
+        rows = conn.execute(select_sql).fetchall()
 
     # Compute per-game favorite implied prob and whether favorite won
-    obs = []
+    obs: list[tuple[float, int]] = []
     for winner, favorite_side, home_odds, away_odds in rows:
         home_p = american_to_implied_prob(int(home_odds))
         away_p = american_to_implied_prob(int(away_odds))
@@ -58,7 +71,6 @@ def build_calibration_favorite(db_path: str, step: float = 0.05) -> int:
         fav_p = home_p if favorite_side == "home" else away_p
         fav_won = 1 if winner == favorite_side else 0
 
-        # Guard against weird values
         if not (0.0 < fav_p < 1.0) or math.isnan(fav_p):
             continue
 
@@ -69,7 +81,11 @@ def build_calibration_favorite(db_path: str, step: float = 0.05) -> int:
     # Aggregate
     results = []
     for bmin, bmax, label in buckets:
-        in_bucket = [(p, w) for (p, w) in obs if (p >= bmin and p < bmax) or (bmax >= 1.0 and p <= bmax and p >= bmin)]
+        in_bucket = [
+            (p, w)
+            for (p, w) in obs
+            if (p >= bmin and p < bmax) or (bmax >= 1.0 and p <= bmax and p >= bmin)
+        ]
         n = len(in_bucket)
         if n == 0:
             continue
@@ -79,20 +95,42 @@ def build_calibration_favorite(db_path: str, step: float = 0.05) -> int:
         results.append((label, bmin, bmax, n, win_rate, avg_p, diff))
 
     # Rebuild table
-    conn.execute("DELETE FROM fact_calibration_favorite")
-    conn.executemany("""
-      INSERT INTO fact_calibration_favorite (
-        bucket_label, bucket_min, bucket_max,
-        n_games, favorite_win_rate, avg_implied_prob, diff_actual_minus_implied
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, results)
-    conn.commit()
+    if is_pg:
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE fact_calibration_favorite;")
+            cur.executemany(
+                """
+                INSERT INTO fact_calibration_favorite (
+                  bucket_label, bucket_min, bucket_max,
+                  n_games, favorite_win_rate, avg_implied_prob, diff_actual_minus_implied
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                results,
+            )
+        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM fact_calibration_favorite")
+            count = int(cur.fetchone()[0])
+        conn.close()
+        return count
 
+    # SQLite
+    conn.execute("DELETE FROM fact_calibration_favorite")
+    conn.executemany(
+        """
+        INSERT INTO fact_calibration_favorite (
+          bucket_label, bucket_min, bucket_max,
+          n_games, favorite_win_rate, avg_implied_prob, diff_actual_minus_implied
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        results,
+    )
+    conn.commit()
     count = conn.execute("SELECT COUNT(*) FROM fact_calibration_favorite").fetchone()[0]
     conn.close()
-    return count
+    return int(count)
 
 
 if __name__ == "__main__":
-    n = build_calibration_favorite("odds.sqlite", step=0.05)
+    n = build_calibration_favorite(step=0.05)
     print("calibration_buckets:", n)
