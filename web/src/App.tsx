@@ -1,6 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { getGames, refreshResults, refreshOdds, type GameRow } from "./lib/api";
 import "./App.css";
+
+function hasLiveGames(rows: GameRow[]) {
+  return rows.some((r) => (r.status ?? "Scheduled") === "In Progress");
+}
 
 function fmtScore(away: number | null, home: number | null) {
   if (away == null || home == null) return "—";
@@ -43,8 +47,14 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [oddsRefreshing, setOddsRefreshing] = useState(false);
+  const loadingRef = useRef(false);
+
+  const live = hasLiveGames(rows);
 
   async function load() {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+
     setLoading(true);
     setError(null);
     try {
@@ -55,6 +65,7 @@ export default function App() {
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setLoading(false);
+      loadingRef.current = false;
     }
   }
 
@@ -84,6 +95,16 @@ export default function App() {
   }
 
   useEffect(() => { void load(); }, [date]);
+
+  useEffect(() => {
+    if (!hasLiveGames(rows)) return;
+
+    const id = window.setInterval(() => {
+      void load();
+    }, 30_000); // 30s
+
+    return () => window.clearInterval(id);
+  }, [rows, date]); // rows changes when load() runs
 
   const th: React.CSSProperties = {
     textAlign: "left",
@@ -130,8 +151,15 @@ export default function App() {
           {loading ? "Loading..." : "Reload"}
         </button>
 
-        <div style={{ marginLeft: "auto", fontSize: 12, opacity: 0.8 }}>
-          Rows: {rows.length}
+        <div style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center" }}>
+          {live && (
+            <div style={{ fontSize: 12, opacity: 0.8 }}>
+              Live games — auto-refreshing
+            </div>
+          )}
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            Rows: {rows.length}
+          </div>
         </div>
       </div>
 
