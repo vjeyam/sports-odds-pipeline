@@ -1,3 +1,6 @@
+# Notes (commit messages and what to work on)
+notes.txt
+
 # Ignore Python bytecode files and virtual environment
 __pycache__/
 .vscode
