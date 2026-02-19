@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date as date_type
 from datetime import datetime, time, timedelta, timezone
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Tuple
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, Query
@@ -17,7 +17,6 @@ from src.transform.build_game_id_map import build_game_id_map
 from src.transform.build_fact_game_results_best_market import build_fact_game_results_best_market
 from src.transform.build_calibration_favorite import build_calibration_favorite
 
-
 app = FastAPI(title="Sports Odds ETL API", version="0.1.0")
 
 
@@ -27,12 +26,11 @@ def root():
 
 
 # Request models
-
 class OddsSnapshotRequest(BaseModel):
     sport: str = "basketball_nba"
     regions: str = "us"
     bookmakers: Optional[str] = None
-    db: Optional[str] = None 
+    db: Optional[str] = None  # optional override; usually use DATABASE_URL
 
 
 class SimpleJobRequest(BaseModel):
@@ -57,7 +55,6 @@ class ResultsRefreshRequest(BaseModel):
 
 
 # Helpers
-
 def _rows_to_dicts(cur) -> List[Dict[str, Any]]:
     cols = [d[0] for d in cur.description]
     return [dict(zip(cols, row)) for row in cur.fetchall()]
@@ -77,7 +74,7 @@ def _parse_iso_dt(s: str) -> datetime:
     return dt
 
 
-def _chicago_day_range(day: date_type) -> tuple[datetime, datetime, ZoneInfo]:
+def _chicago_day_range(day: date_type) -> Tuple[datetime, datetime, ZoneInfo]:
     chi = ZoneInfo("America/Chicago")
     start_local = datetime.combine(day, time.min).replace(tzinfo=chi)
     end_local = start_local + timedelta(days=1)
@@ -85,7 +82,6 @@ def _chicago_day_range(day: date_type) -> tuple[datetime, datetime, ZoneInfo]:
 
 
 # Health endpoints
-
 @app.get("/health")
 def health():
     return {"ok": True}
@@ -97,9 +93,12 @@ def api_health():
 
 
 # Public endpoints for React UI
-
 @app.get("/api/games/joined")
 def api_games_joined(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)")):
+    """
+    Reads from fact_game_results_best_market (already joined odds + results).
+    Filters by Chicago-local day in Python (timezone-safe for SQLite).
+    """
     try:
         day = date_type.fromisoformat(date)
     except ValueError:
@@ -110,7 +109,6 @@ def api_games_joined(date: str = Query(..., description="YYYY-MM-DD (Chicago loc
     con = connect()
     cur = con.cursor()
 
-    # Pull all rows, filter by Chicago-local day.
     cur.execute(
         """
         SELECT
@@ -151,6 +149,9 @@ def api_games_joined(date: str = Query(..., description="YYYY-MM-DD (Chicago loc
 
 @app.get("/games/odds")
 def games_odds(date: str = Query(..., description="YYYY-MM-DD (UTC date prefix)")):
+    """
+    Pure odds endpoint (UTC prefix match on commence_time).
+    """
     try:
         date_type.fromisoformat(date)
     except ValueError:
@@ -186,7 +187,8 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
     Unified endpoint:
     - Always returns games (from best-market odds)
     - Adds results if they exist (left join)
-    - Date is interpreted as Chicago local day to match UI expectations
+    - Date is interpreted as Chicago local day (UI expectation)
+    - IMPORTANT: scores only included when ESPN row is completed=1 (prevents 0-0 'Final' bug)
     """
     try:
         day = date_type.fromisoformat(date)
@@ -198,12 +200,10 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
     con = connect()
     cur = con.cursor()
 
-    # Pull candidates by rough UTC prefix window to keep it small, then filter precisely in Python.
-    # This avoids needing timezone functions in SQLite.
-    # We fetch both the selected day and the adjacent UTC day because Chicago local day can span two UTC dates.
+    # Chicago local day can span two UTC prefixes, so pull a small window and filter precisely in Python.
+    prev_day_str = (day - timedelta(days=1)).isoformat()
     day_str = day.isoformat()
     next_day_str = (day + timedelta(days=1)).isoformat()
-    prev_day_str = (day - timedelta(days=1)).isoformat()
 
     sql = """
     SELECT
@@ -214,12 +214,12 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
       o.best_home_price_american,
       o.best_away_price_american,
 
-      r.home_score,
-      r.away_score,
+      CASE WHEN r.completed = 1 THEN r.home_score ELSE NULL END AS home_score,
+      CASE WHEN r.completed = 1 THEN r.away_score ELSE NULL END AS away_score,
 
       CASE
-        WHEN r.home_score > r.away_score THEN 'home'
-        WHEN r.away_score > r.home_score THEN 'away'
+        WHEN r.completed = 1 AND r.home_score > r.away_score THEN 'home'
+        WHEN r.completed = 1 AND r.away_score > r.home_score THEN 'away'
         ELSE NULL
       END AS winner
 
@@ -229,9 +229,14 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
     LEFT JOIN raw_espn_game_results r
       ON m.espn_event_id = r.espn_event_id
 
-    WHERE o.commence_time LIKE ? OR o.commence_time LIKE ? OR o.commence_time LIKE ?
+    WHERE
+      o.commence_time LIKE ?
+      OR o.commence_time LIKE ?
+      OR o.commence_time LIKE ?
+
     ORDER BY o.commence_time
     """
+
     cur.execute(sql, (f"{prev_day_str}%", f"{day_str}%", f"{next_day_str}%"))
     rows = _rows_to_dicts(cur)
 
@@ -253,7 +258,12 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
 
 @app.post("/api/etl/results-refresh")
 def api_results_refresh(req: ResultsRefreshRequest):
-    # Convert Chicago ISO dates -> ESPN scoreboard YYYYMMDD
+    """
+    Button-driven refresh:
+    - converts YYYY-MM-DD -> ESPN scoreboard YYYYMMDD
+    - pulls ESPN rows
+    - rebuilds mapping + fact join table
+    """
     yyyymmdd: List[str] = []
     for d in req.dates:
         try:
@@ -276,7 +286,6 @@ def api_results_refresh(req: ResultsRefreshRequest):
 
 
 # Jobs (internal/ops)
-
 @app.post("/jobs/odds-snapshot")
 def job_odds_snapshot(req: OddsSnapshotRequest):
     try:

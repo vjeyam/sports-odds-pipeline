@@ -8,7 +8,8 @@ function fmtScore(a: number | null, h: number | null) {
 }
 
 function status(row: GameRow) {
-  return row.home_score == null || row.away_score == null ? "Scheduled" : "Final";
+  if (row.home_score == null || row.away_score == null) return "Scheduled";
+  return "Final";
 }
 
 function fmtML(x: number | null) {
@@ -141,7 +142,7 @@ export default function App() {
 
           <tbody>
             {rows.map((r) => {
-              const isFinal = r.home_score != null && r.away_score != null;
+              const isFinal = r.home_score != null && r.away_score != null && !(r.home_score === 0 && r.away_score === 0);
               const homeWon = r.winner === "home";
               const awayWon = r.winner === "away";
 
