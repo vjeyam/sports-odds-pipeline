@@ -1,0 +1,125 @@
+.gList {
+  display: grid;
+  gap: 12px;
+}
+
+.gCard {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+  display: grid;
+  gap: 10px;
+}
+
+.gCard--muted {
+  opacity: 0.9;
+}
+
+.gTopRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.gTime {
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.gMuted {
+  opacity: 0.7;
+}
+
+.gBadges {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.gBadge {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.gBadge--neutral {}
+
+.gBadge--good {
+  background: rgba(46, 204, 113, 0.10);
+  border: 1px solid rgba(46, 204, 113, 0.25);
+}
+
+.gBadge--warn {
+  background: rgba(241, 196, 15, 0.12);
+  border: 1px solid rgba(241, 196, 15, 0.28);
+}
+
+.gBadge--live {
+  background: rgba(52, 152, 219, 0.12);
+  border: 1px solid rgba(52, 152, 219, 0.28);
+}
+
+.gTeams {
+  display: grid;
+  gap: 6px;
+}
+
+.gTeamRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.gTeamLeft {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.gTeamName {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.gTeamRight {
+  font-size: 14px;
+  opacity: 0.95;
+}
+
+.gBottomRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  opacity: 0.9;
+}
+
+.gDetails {
+  margin-top: 2px;
+}
+
+.gDetails summary {
+  cursor: pointer;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.gDetailsBody {
+  margin-top: 10px;
+  font-size: 13px;
+  opacity: 0.9;
+  display: grid;
+  gap: 6px;
+}

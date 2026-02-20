@@ -1,0 +1,93 @@
+/* Page layout */
+.gpPage {
+  display: grid;
+  gap: 16px;
+}
+
+/* Header */
+.gpHeader {
+  display: grid;
+  gap: 6px;
+}
+
+.gpTitle {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.gpSubtitle {
+  font-size: 13px;
+  opacity: 0.85;
+  line-height: 1.4;
+}
+
+/* Controls bar */
+.gpControls {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.gpField {
+  display: grid;
+  gap: 6px;
+}
+
+.gpLabel {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.gpDateInput {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.20);
+  color: inherit;
+}
+
+/* Buttons */
+.gpBtn {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+
+.gpBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Right-side status */
+.gpRight {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.gpLivePill {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.gpStats {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  opacity: 0.9;
+}

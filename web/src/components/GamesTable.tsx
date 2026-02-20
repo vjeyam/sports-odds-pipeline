@@ -1,17 +1,17 @@
 import type { GameRow } from "../lib/api";
-import { th, td } from "../styles/ui";
-
-function fmtScore(away: number | null, home: number | null) {
-  if (away == null || home == null) return "—";
-  return `${away} - ${home}`;
-}
+import "../styles/games.css";
 
 function fmtML(x: number | null) {
   if (x == null) return "—";
   return x > 0 ? `+${x}` : `${x}`;
 }
 
-function fmtTime(iso: string | null) {
+function fmtScore(away: number | null | undefined, home: number | null | undefined) {
+  if (away == null || home == null) return "—";
+  return `${away}–${home}`;
+}
+
+function fmtTimeCT(iso: string | null | undefined) {
   if (!iso) return "—";
   const d = new Date(iso);
   return d.toLocaleString("en-US", {
@@ -23,71 +23,185 @@ function fmtTime(iso: string | null) {
   });
 }
 
-function statusLabel(row: GameRow) {
-  return row.status ?? "Scheduled";
+function statusText(row: GameRow) {
+  return row.status ?? (row.completed === 1 ? "Final" : "Scheduled");
+}
+
+function isLive(row: GameRow) {
+  return (row.status ?? "Scheduled") === "In Progress";
+}
+
+function isFinal(row: GameRow) {
+  return row.completed === 1 || (row.status ?? "") === "Final";
+}
+
+function favoriteSide(row: GameRow): "away" | "home" | null {
+  const a = row.best_away_price_american;
+  const h = row.best_home_price_american;
+  if (a == null || h == null) return null;
+  if (a === h) return null;
+  // More negative is the favorite
+  return a < h ? "away" : "home";
+}
+
+function norm(s: string) {
+  return s.trim().toLowerCase();
+}
+
+/**
+ * Backend winner may be:
+ *  - "home" | "away"
+ *  - team name ("Indiana Pacers")
+ */
+function winnerSide(row: GameRow): "home" | "away" | null {
+  const w = row.winner;
+  if (!w) return null;
+
+  if (w === "home" || w === "away") return w;
+
+  // winner is a team name
+  const wn = norm(w);
+  const home = norm(row.home_team ?? "");
+  const away = norm(row.away_team ?? "");
+
+  if (wn === home) return "home";
+  if (wn === away) return "away";
+
+  // handle partial match (rare but helpful)
+  if (home && wn.includes(home)) return "home";
+  if (away && wn.includes(away)) return "away";
+
+  return null;
+}
+
+function winnerLabel(row: GameRow): string | null {
+  const ws = winnerSide(row);
+  if (!ws) return null;
+  return ws === "home" ? row.home_team : row.away_team;
+}
+
+function didUpset(row: GameRow): boolean {
+  if (!isFinal(row)) return false;
+
+  const fav = favoriteSide(row); // "home" | "away" concept but stored as away/home
+  if (!fav) return false;
+
+  const ws = winnerSide(row); // "home" | "away"
+  if (!ws) return false;
+
+  // map fav to same vocabulary
+  const favSide = fav === "home" ? "home" : "away";
+  return ws !== favSide;
+}
+
+function Badge({
+  label,
+  variant = "neutral",
+}: {
+  label: string;
+  variant?: "neutral" | "good" | "warn" | "live";
+}) {
+  return <span className={`gBadge gBadge--${variant}`}>{label}</span>;
 }
 
 function rowKey(r: GameRow, idx: number) {
-  // Primary key
   if (r.odds_event_id) return r.odds_event_id;
-
-  // Fallback: deterministic composite key (should rarely be needed)
   const t = r.start_time ?? r.commence_time ?? "no-time";
   const a = r.away_team ?? "no-away";
   const h = r.home_team ?? "no-home";
   return `${t}|${a}|${h}|${idx}`;
 }
 
-export function GamesTable({ rows }: { rows: GameRow[] }) {
-  const cleanRows = rows.filter(r => r?.odds_event_id && r.odds_event_id.trim().length > 0);
+export function GamesTable({ rows, loading }: { rows: GameRow[]; loading?: boolean }) {
+  const cleanRows = rows.filter((r) => r?.odds_event_id && r.odds_event_id.trim().length > 0);
 
   return (
-    <div style={{ marginTop: 16, overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th style={th}>Time (CT)</th>
-            <th style={th}>Away</th>
-            <th style={th}>Home</th>
-            <th style={th}>Away ML</th>
-            <th style={th}>Home ML</th>
-            <th style={th}>Score</th>
-            <th style={th}>Winner</th>
-            <th style={th}>Status</th>
-          </tr>
-        </thead>
+    <div className="gList">
+      {loading && <div className="gCard gCard--muted">Loading games…</div>}
 
-        <tbody>
-          {cleanRows.map((r, idx) => {
-            const isFinal = r.completed === 1;
-            const timeToShow = r.start_time ?? r.commence_time;
+      {!loading && cleanRows.length === 0 && (
+        <div className="gCard gCard--muted">No games found for this date.</div>
+      )}
 
-            return (
-              <tr key={rowKey(r, idx)}>
-                <td style={td}>{fmtTime(timeToShow)}</td>
-                <td style={td}>{r.away_team ?? "—"}</td>
-                <td style={td}>{r.home_team ?? "—"}</td>
-                <td style={td}>{fmtML(r.best_away_price_american)}</td>
-                <td style={td}>{fmtML(r.best_home_price_american)}</td>
-                <td style={td}>{fmtScore(r.away_score, r.home_score)}</td>
+      {cleanRows.map((r, idx) => {
+        const timeToShow = r.start_time ?? r.commence_time;
+        const fav = favoriteSide(r);
+        const upset = didUpset(r);
+        const winTeam = winnerLabel(r);
 
-                {/* winner only when completed */}
-                <td style={td}>{isFinal ? (r.winner ?? "—") : "—"}</td>
+        return (
+          <div key={rowKey(r, idx)} className="gCard">
+            {/* Top row */}
+            <div className="gTopRow">
+              <div className="gTime">
+                <b>{fmtTimeCT(timeToShow)}</b> <span className="gMuted">(CT)</span>
+              </div>
 
-                <td style={td}>{statusLabel(r)}</td>
-              </tr>
-            );
-          })}
+              <div className="gBadges">
+                {isLive(r) && <Badge label="Live" variant="live" />}
+                {isFinal(r) && <Badge label="Final" variant="good" />}
+                {!isLive(r) && !isFinal(r) && <Badge label="Scheduled" variant="neutral" />}
+                {upset && <Badge label="Upset" variant="warn" />}
+              </div>
+            </div>
 
-          {cleanRows.length === 0 && (
-            <tr>
-              <td style={td} colSpan={8}>
-                No games found for this date.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            {/* Teams */}
+            <div className="gTeams">
+              <div className="gTeamRow">
+                <div className="gTeamLeft">
+                  <div className="gTeamName">{r.away_team ?? "—"}</div>
+                  {fav === "away" && <Badge label="Favorite" variant="neutral" />}
+                </div>
+                <div className="gTeamRight">
+                  Away ML: <b>{fmtML(r.best_away_price_american)}</b>
+                </div>
+              </div>
+
+              <div className="gTeamRow">
+                <div className="gTeamLeft">
+                  <div className="gTeamName">{r.home_team ?? "—"}</div>
+                  {fav === "home" && <Badge label="Favorite" variant="neutral" />}
+                </div>
+                <div className="gTeamRight">
+                  Home ML: <b>{fmtML(r.best_home_price_american)}</b>
+                </div>
+              </div>
+            </div>
+
+            {/* Results */}
+            <div className="gBottomRow">
+              <div>
+                Score: <b>{fmtScore(r.away_score, r.home_score)}</b>
+              </div>
+              <div>
+                Status: <b>{statusText(r)}</b>
+                {isFinal(r) && winTeam ? (
+                  <>
+                    {" "}
+                    • Winner: <b>{winTeam}</b>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            {/* Details */}
+            <details className="gDetails">
+              <summary>Details</summary>
+              <div className="gDetailsBody">
+                <div>
+                  Odds event id: <span className="gMuted">{r.odds_event_id}</span>
+                </div>
+                <div>
+                  Commence time: <span className="gMuted">{r.commence_time ?? "—"}</span>
+                </div>
+                <div>
+                  Start time (ESPN): <span className="gMuted">{r.start_time ?? "—"}</span>
+                </div>
+              </div>
+            </details>
+          </div>
+        );
+      })}
     </div>
   );
 }

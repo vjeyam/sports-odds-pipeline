@@ -1,12 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { 
-  getGames,
-  refreshOdds,
-  refreshResults,
-  type GameRow
-} from "../lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getGames, refreshOdds, refreshResults, type GameRow } from "../lib/api";
 import { ErrorBox } from "../components/ErrorBox";
 import { GamesTable } from "../components/GamesTable";
+import "../styles/gamesPage.css";
 
 function todayISO(): string {
   const d = new Date();
@@ -30,6 +26,13 @@ export default function GamesPage() {
 
   const loadingRef = useRef(false);
   const live = hasLiveGames(rows);
+
+  const stats = useMemo(() => {
+    const total = rows.length;
+    const completed = rows.filter((r) => r.completed === 1).length;
+    const inProgress = rows.filter((r) => (r.status ?? "Scheduled") === "In Progress").length;
+    return { total, completed, inProgress };
+  }, [rows]);
 
   async function load() {
     if (loadingRef.current) return;
@@ -91,43 +94,71 @@ export default function GamesPage() {
   }, [rows, date]);
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-        <label style={{ display: "grid", gap: 6 }}>
-          <span style={{ fontSize: 12, opacity: 0.8 }}>Date</span>
+    <div className="gpPage">
+      {/* Header */}
+      <div className="gpHeader">
+        <div className="gpTitle">Games & Odds</div>
+        <div className="gpSubtitle">
+          You’re viewing the <b>best available moneyline</b> across sportsbooks for each game.
+          Odds are shown in <b>American format</b> (e.g. <b>-180</b> favorite, <b>+160</b> underdog).
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="gpControls">
+        <label className="gpField">
+          <span className="gpLabel">Date</span>
           <input
+            className="gpDateInput"
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            style={{ padding: 8 }}
           />
         </label>
 
         <button
+          className="gpBtn"
           onClick={onRefreshResults}
           disabled={loading || refreshing}
-          style={{ padding: "10px 14px" }}
           title="Runs results ETL for the selected date"
         >
-          {refreshing ? "Refreshing..." : "Refresh Results"}
+          {refreshing ? "Refreshing Results..." : "Refresh Results"}
         </button>
 
-        <button onClick={onRefreshOdds} disabled={oddsRefreshing} style={{ padding: "10px 14px" }}>
+        <button className="gpBtn" onClick={onRefreshOdds} disabled={oddsRefreshing}>
           {oddsRefreshing ? "Refreshing Odds..." : "Refresh Odds"}
         </button>
 
-        <button onClick={load} disabled={loading || refreshing} style={{ padding: "10px 14px" }}>
+        <button className="gpBtn" onClick={load} disabled={loading || refreshing}>
           {loading ? "Loading..." : "Reload"}
         </button>
 
-        <div style={{ marginLeft: "auto", display: "flex", gap: 12, alignItems: "center" }}>
-          {live && <div style={{ fontSize: 12, opacity: 0.8 }}>Live games — auto-refreshing</div>}
-          <div style={{ fontSize: 12, opacity: 0.8 }}>Rows: {rows.length}</div>
+        <div className="gpRight">
+          {live && (
+            <div
+              className="gpLivePill"
+              title="This page will auto-refresh every 30 seconds while games are live"
+            >
+              Live games — auto-refreshing
+            </div>
+          )}
+
+          <div className="gpStats">
+            <span>
+              Games: <b>{stats.total}</b>
+            </span>
+            <span>
+              Completed: <b>{stats.completed}</b>
+            </span>
+            <span>
+              Live: <b>{stats.inProgress}</b>
+            </span>
+          </div>
         </div>
       </div>
 
       <ErrorBox error={error} />
-      <GamesTable rows={rows} />
+      <GamesTable rows={rows} loading={loading} />
     </div>
   );
 }
