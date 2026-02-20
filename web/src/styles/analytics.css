@@ -79,7 +79,7 @@
   opacity: 0.95;
 }
 
-/* --- KPI grid: always fills width nicely --- */
+/* KPI grid: always fills width nicely */
 .kpiGrid {
   margin-top: 16px;
   display: grid;
@@ -117,7 +117,8 @@
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
   font-size: 12px;
 }
 
@@ -153,10 +154,10 @@
 
 .segmented {
   display: inline-flex;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   overflow: hidden;
-  background: rgba(255,255,255,0.03);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .segmentBtn {
@@ -169,7 +170,7 @@
 }
 
 .segmentBtnActive {
-  background: rgba(255,255,255,0.10);
+  background: rgba(255, 255, 255, 0.10);
   opacity: 1;
 }
 
@@ -177,26 +178,31 @@
 .chartsScroll {
   display: grid;
   gap: 12px;
+  align-items: stretch;
 }
 
 .chartsTwoUp {
   display: grid;
   gap: 12px;
   grid-template-columns: 1fr;
+  align-items: stretch;
 }
 
 @media (min-width: 980px) {
   .chartsTwoUp {
     grid-template-columns: 1fr 1fr;
-    align-items: start;
+    align-items: stretch;
   }
 }
 
+/* Chart cards: make them flex columns so header + body are consistent */
 .chartCard {
-  padding: 12px;
-  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
   border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.03);
+  padding: 12px;
 }
 
 .analyticsChartsGrid {
@@ -211,17 +217,11 @@
   }
 }
 
-.chartCard {
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 14px;
-  background: rgba(255,255,255,0.03);
-  padding: 12px;
-}
-
 .chartCardHeader {
   display: grid;
   gap: 4px;
   margin-bottom: 10px;
+  min-height: 74px;
 }
 
 .chartTitle {
@@ -235,6 +235,7 @@
   line-height: 1.35;
 }
 
+/* Chart body: fixed height so both charts match exactly */
 .chartBody {
   height: 320px;
 }

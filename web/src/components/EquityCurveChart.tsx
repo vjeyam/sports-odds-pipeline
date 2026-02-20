@@ -89,7 +89,7 @@ export default function EquityCurveChart({ start, end }: Props) {
     return out;
   }, [fav, dog]);
 
-  // ✅ Different colors + legend key
+  // legend key
   const FAVORITE_COLOR = "#4F8CFF"; // blue
   const UNDERDOG_COLOR = "#22C55E"; // green
 
@@ -116,7 +116,6 @@ export default function EquityCurveChart({ start, end }: Props) {
             verticalAlign="bottom"
             align="center"
             wrapperStyle={{ fontSize: 12, opacity: 0.9 }}
-            formatter={(value) => (value === "favorite" ? "Favorite" : "Underdog")}
           />
           <Line
             type="monotone"
