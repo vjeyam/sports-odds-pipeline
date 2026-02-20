@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import traceback
-from datetime import date as date_type
-from typing import List
+from datetime import date as date_type, datetime, timedelta
+from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException
 
@@ -19,30 +20,52 @@ from src.transform.build_strategy_equity_curve import build_strategy_equity_curv
 router = APIRouter(tags=["etl"])
 
 
-@router.post("/api/etl/results-refresh")
-def api_results_refresh(req: ResultsRefreshRequest):
+def _default_results_dates_iso() -> List[str]:
     """
-    Button-driven refresh:
-    - converts YYYY-MM-DD -> ESPN scoreboard YYYYMMDD
-    - pulls ESPN rows
-    - rebuilds mapping + fact join table
-    - ALSO rebuilds fact_strategy_equity_curve (auto, so it doesn't get stale)
+    Default UI-style dates (YYYY-MM-DD) in America/Chicago:
+    yesterday + today.
     """
-    yyyymmdd: List[str] = []
-    for d in req.dates:
+    chi = ZoneInfo("America/Chicago")
+    today = datetime.now(chi).date()
+    yday = today - timedelta(days=1)
+    return [yday.isoformat(), today.isoformat()]
+
+
+def _iso_dates_to_scoreboard_yyyymmdd(dates_iso: List[str]) -> List[str]:
+    """
+    Convert YYYY-MM-DD -> YYYYMMDD for ESPN scoreboard pulls.
+    """
+    out: List[str] = []
+    for d in dates_iso:
         try:
             dt = date_type.fromisoformat(d)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid date: {d} (use YYYY-MM-DD)")
-        yyyymmdd.append(dt.strftime("%Y%m%d"))
+        out.append(dt.strftime("%Y%m%d"))
+    return out
 
+
+@router.post("/api/etl/results-refresh")
+def api_results_refresh(req: ResultsRefreshRequest):
+    """
+    Button-driven refresh:
+    - accepts YYYY-MM-DD (UI)
+    - if dates omitted, defaults to yesterday + today (Chicago)
+    - pulls ESPN rows
+    - rebuilds mapping + fact join table
+    - ALSO rebuilds fact_strategy_equity_curve (auto, so it doesn't get stale)
+    """
     try:
-        db_path = db_target(req.db)
+        dates_iso = req.dates or _default_results_dates_iso()
+        yyyymmdd = _iso_dates_to_scoreboard_yyyymmdd(dates_iso)
+
+        db_path = db_target(getattr(req, "db", None))
+        league = getattr(req, "league", "nba")
 
         pull_summary = run_espn_results_pull(
             db_path=db_path,
             dates=yyyymmdd,
-            league=req.league,
+            league=league,
         )
 
         mapped = build_game_id_map(db_path)
@@ -52,13 +75,24 @@ def api_results_refresh(req: ResultsRefreshRequest):
         equity_rows = build_strategy_equity_curve(db_path, stake=1.0)
 
         return {
+            "ok": True,
+            "dates_iso": dates_iso,
+            "dates_scoreboard": yyyymmdd,
+            "league": league,
             "pull": pull_summary,
             "mapped": mapped,
             "fact_rows": fact_rows,
             "equity_rows": equity_rows,
         }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {e}",
+        )
 
 
 @router.post("/api/etl/odds-refresh")
@@ -89,7 +123,8 @@ def api_odds_refresh(req: OddsRefreshRequest):
             "mapped_rows": mapped,
             "fact_rows": fact_rows,
         }
+
     except Exception as e:
         print("ODDS REFRESH ERROR:", repr(e))
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")

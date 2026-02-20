@@ -17,8 +17,8 @@ services:
       test: ["CMD-SHELL", "pg_isready -U odds -d odds"]
       interval: 5s
       timeout: 5s
-      retries: 5
-  
+      retries: 20
+
   python-api:
     build:
       context: .
@@ -26,15 +26,14 @@ services:
     env_file:
       - .env
     environment:
+      # Inside docker network, host is the service name "db"
       DATABASE_URL: postgresql://odds:odds@db:5432/odds
-      # If you use .env locally, you can also pass ODDS_API_KEY here or via env_file:
-      # ODDS_API_KEY: ${ODDS_API_KEY}
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "8000:8000"
-  
+
   java-api:
     build:
       context: .

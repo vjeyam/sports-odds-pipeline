@@ -10,6 +10,16 @@ import {
 } from "recharts";
 import { getStrategyRoiBuckets, type RoiBucketRow, type StrategyName } from "../lib/api";
 
+function fmt(x: number | null | undefined, digits = 3) {
+  if (x == null) return "—";
+  return x.toFixed(digits);
+}
+
+function pct(x: number | null | undefined) {
+  if (x == null) return "—";
+  return `${(x * 100).toFixed(1)}%`;
+}
+
 export default function RoiBucketsChart({
   strategy,
   start,
@@ -48,18 +58,23 @@ export default function RoiBucketsChart({
     () =>
       rows.map((r) => ({
         bucket: r.bucket,
-        roi: r.roi ?? 0,      // recharts needs a number
-        roi_raw: r.roi,       // keep for tooltip
+        roi: r.roi ?? 0, // recharts needs a number
+        roi_raw: r.roi,
         n_bets: r.n_bets,
+        wins: r.wins,
         win_rate: r.win_rate,
+        profit: r.profit,
       })),
     [rows]
   );
 
+  const hasAnyBets = rows.some((r) => r.n_bets > 0);
+
   if (loading) return <div style={{ opacity: 0.8 }}>Loading ROI buckets…</div>;
   if (err) return <div style={{ color: "tomato" }}>ROI buckets error: {err}</div>;
-  if (!rows.length || rows.every((r) => r.n_bets === 0))
+  if (!rows.length || !hasAnyBets) {
     return <div style={{ opacity: 0.8 }}>No decided games in this range yet.</div>;
+  }
 
   return (
     <div style={{ width: "100%", height: 280 }}>
@@ -67,16 +82,35 @@ export default function RoiBucketsChart({
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
           <XAxis dataKey="bucket" />
-          <YAxis />
+          <YAxis tickFormatter={(v) => (typeof v === "number" ? v.toFixed(2) : String(v))} />
           <Tooltip
             formatter={(value: any, name: any, props: any) => {
+              // We only have one bar series ("roi"), but keep this generic.
               if (name === "roi") {
-                const raw = props?.payload?.roi_raw;
-                return [raw == null ? "—" : raw.toFixed(3), "ROI ($1)"];
+                const p = props?.payload;
+                const n = p?.n_bets ?? 0;
+
+                if (!n) {
+                  return ["No bets", "ROI ($1)"];
+                }
+
+                return [fmt(p?.roi_raw, 3), "ROI ($1)"];
               }
               return [value, name];
             }}
-            labelFormatter={(label) => `Implied prob bucket: ${label}`}
+            labelFormatter={(label, payload) => {
+              const p = payload?.[0]?.payload;
+              if (!p) return `Implied prob bucket: ${label}`;
+
+              const n = p.n_bets ?? 0;
+              const wins = p.wins ?? 0;
+
+              if (!n) return `Implied prob bucket: ${label} (0 bets)`;
+
+              return `Implied prob bucket: ${label} (${n} bets, ${wins} wins, win ${pct(
+                p.win_rate
+              )})`;
+            }}
           />
           <Bar dataKey="roi" name="ROI ($1)" />
         </BarChart>

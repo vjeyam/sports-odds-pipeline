@@ -12,6 +12,10 @@ from src.db import connect
 
 router = APIRouter(tags=["strategies"])
 
+def _ph(con) -> str:
+    # sqlite uses ?, psycopg uses %s
+    return "%s" if con.__class__.__module__.startswith("psycopg") else "?"
+
 
 def _pick_side(strat: str, fav: str, dog: str) -> str:
     if strat == "favorite":
@@ -140,6 +144,7 @@ def api_strategies_equity(
 ):
     """
     Equity curve points from fact_strategy_equity_curve (if present).
+    Compatible with BOTH SQLite (?) and Postgres (%s) without dynamic SQL.
     """
     if strategy not in ("favorite", "underdog", "home", "away"):
         raise HTTPException(status_code=400, detail="strategy must be favorite|underdog|home|away")
@@ -155,10 +160,10 @@ def api_strategies_equity(
     chi = ZoneInfo("America/Chicago")
 
     con = connect()
-    cur = con.cursor()
+    try:
+        cur = con.cursor()
 
-    cur.execute(
-        """
+        sql_sqlite = """
         SELECT
           game_index,
           commence_time,
@@ -173,31 +178,55 @@ def api_strategies_equity(
         FROM fact_strategy_equity_curve
         WHERE strategy = ?
         ORDER BY game_index
-        """,
-        (strategy,),
-    )
-    rows = rows_to_dicts(cur)
+        """
 
-    equity: List[Dict[str, Any]] = []
-    for r in rows:
-        ct = r.get("commence_time")
-        if not ct:
-            continue
+        sql_pg = """
+        SELECT
+          game_index,
+          commence_time,
+          bet_profit,
+          cum_profit,
+          cum_roi,
+          picked_side,
+          winner,
+          odds_american,
+          odds_event_id,
+          espn_event_id
+        FROM fact_strategy_equity_curve
+        WHERE strategy = %s
+        ORDER BY game_index
+        """
+
+        is_pg = con.__class__.__module__.startswith("psycopg")
+        cur.execute(sql_pg if is_pg else sql_sqlite, (strategy,))
+        rows = rows_to_dicts(cur)
+
+        equity: List[Dict[str, Any]] = []
+        for r in rows:
+            ct = r.get("commence_time")
+            if not ct:
+                continue
+            try:
+                dt_local = parse_iso_dt(ct).astimezone(chi)
+            except Exception:
+                continue
+
+            if start_day <= dt_local.date() <= end_day:
+                equity.append(r)
+
+        return {
+            "strategy": strategy,
+            "start": start_day.isoformat(),
+            "end": end_day.isoformat(),
+            "n_points": len(equity),
+            "equity": equity,
+        }
+
+    finally:
         try:
-            dt_local = parse_iso_dt(ct).astimezone(chi)
+            con.close()
         except Exception:
-            continue
-
-        if start_day <= dt_local.date() <= end_day:
-            equity.append(r)
-
-    return {
-        "strategy": strategy,
-        "start": start_day.isoformat(),
-        "end": end_day.isoformat(),
-        "n_points": len(equity),
-        "equity": equity,
-    }
+            pass
 
 
 @router.get("/api/strategies/roi-buckets")

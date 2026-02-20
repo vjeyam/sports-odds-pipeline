@@ -1,16 +1,22 @@
 name: Scheduled ETL (Odds + Results)
 
 on:
-  # run automatically when you push to this branch (for migration/testing)
   push:
-    branches: [fullstack-migration]
+    branches: [main]
 
-  # scheduled runs only trigger from the repo default branch (usually main)
   schedule:
-    - cron: "5 14 * * *"
-    - cron: "5 13 * * *"
-    - cron: "5 8 * * *"
-    - cron: "5 7 * * *"
+    # GitHub cron is UTC
+    # Odds: ~07:05 CT (CST + CDT)
+    - cron: "5 13 * * *"   # 07:05 CT during CST
+    - cron: "5 12 * * *"   # 07:05 CT during CDT
+
+    # Odds: ~15:05 CT
+    - cron: "5 21 * * *"   # 15:05 CT during CST
+    - cron: "5 20 * * *"   # 15:05 CT during CDT
+
+    # Results: ~00:30 CT
+    - cron: "30 6 * * *"   # 00:30 CT during CST
+    - cron: "30 5 * * *"   # 00:30 CT during CDT
 
   workflow_dispatch:
     inputs:
@@ -19,12 +25,10 @@ on:
         required: true
         default: "odds"
         type: choice
-        options:
-          - odds
-          - results
+        options: [odds, results, all]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: scheduled-etl
@@ -35,14 +39,13 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      DB_PATH: ${{ github.workspace }}/data/demo_odds.sqlite
+      # Your repo secret can be odds.sqlite OR a postgres URL.
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SQLITE_PATH: ${{ github.workspace }}/data/demo_odds.sqlite
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # ensure we operate on the triggering branch/ref
-          ref: ${{ github.ref }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -54,34 +57,60 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Decide task (odds vs results)
+      - name: Decide task (odds vs results vs all)
         id: decide
+        shell: bash
         run: |
-          set -e
-          S="${{ github.event.schedule }}"
-          TASK="${{ inputs.task }}"
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            if [ "$S" = "5 14 * * *" ] || [ "$S" = "5 13 * * *" ]; then
-              echo "task=odds" >> $GITHUB_OUTPUT
-            elif [ "$S" = "5 8 * * *" ] || [ "$S" = "5 7 * * *" ]; then
-              echo "task=results" >> $GITHUB_OUTPUT
-            else
-              echo "Unknown schedule: $S"
-              exit 1
-            fi
+          set -euo pipefail
+          EVENT="${{ github.event_name }}"
+          SCHEDULE="${{ github.event.schedule }}"
+          INPUT_TASK="${{ inputs.task || 'odds' }}"
+
+          TASK="odds"
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            TASK="$INPUT_TASK"
+          elif [ "$EVENT" = "schedule" ]; then
+            case "$SCHEDULE" in
+              "30 6 * * *"|"30 5 * * *")
+                TASK="results"
+                ;;
+              *)
+                TASK="odds"
+                ;;
+            esac
           else
-            # for push + workflow_dispatch, use the selected input (default "odds")
-            echo "task=$TASK" >> $GITHUB_OUTPUT
+            TASK="odds"
           fi
 
-      - name: Ensure data folder exists
-        run: mkdir -p data
+          echo "task=$TASK" >> "$GITHUB_OUTPUT"
+          echo "Selected task: $TASK"
+
+      - name: Resolve DB target (Postgres vs SQLite)
+        id: db
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DB_URL="${DATABASE_URL:-}"
+
+          # Only treat as Postgres if it looks like Postgres
+          if [[ "$DB_URL" == postgresql://* || "$DB_URL" == postgres://* ]]; then
+            echo "db_target=$DB_URL" >> "$GITHUB_OUTPUT"
+            echo "mode=postgres" >> "$GITHUB_OUTPUT"
+            echo "Using Postgres DATABASE_URL."
+          else
+            mkdir -p data
+            echo "db_target=${SQLITE_PATH}" >> "$GITHUB_OUTPUT"
+            echo "mode=sqlite" >> "$GITHUB_OUTPUT"
+            echo "Using SQLite at ${SQLITE_PATH}."
+          fi
 
       - name: SQLite settings (CI-safe)
+        if: steps.db.outputs.mode == 'sqlite'
         run: |
           python - <<'PY'
           import sqlite3, os
-          db = os.environ["DB_PATH"]
+          db = os.environ["SQLITE_PATH"]
           con = sqlite3.connect(db)
           con.execute("PRAGMA journal_mode=DELETE;")
           con.execute("PRAGMA synchronous=FULL;")
@@ -90,77 +119,62 @@ jobs:
           print("Configured SQLite for CI:", db)
           PY
 
-      # odds
+      # --------------------
+      # ODDS
+      # --------------------
       - name: Pull odds snapshot
-        if: steps.decide.outputs.task == 'odds'
+        if: steps.decide.outputs.task == 'odds' || steps.decide.outputs.task == 'all'
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
-          python -m src.pipelines.run_odds_snapshot --sport basketball_nba --regions us --db "${DB_PATH}"
+          python -m src.pipelines.run_odds_snapshot \
+            --sport basketball_nba \
+            --regions us \
+            --db "${{ steps.db.outputs.db_target }}"
 
-      - name: Debug DB counts (after odds)
-        if: steps.decide.outputs.task == 'odds'
-        run: |
-          python - <<'PY'
-          import os, sqlite3
-          db = os.environ["DB_PATH"]
-          con = sqlite3.connect(db)
-          cur = con.cursor()
-          tables = ["raw_moneyline_odds","raw_espn_game_results","game_id_map","fact_game_results_best_market"]
-          print("DB:", db)
-          for t in tables:
-            try:
-              n = cur.execute(f"select count(*) from {t}").fetchone()[0]
-              print(f"{t}: {n}")
-            except Exception as e:
-              print(f"{t}: (missing) {e}")
-          con.close()
-          PY
-
-      # results
+      # --------------------
+      # RESULTS + TRANSFORMS
+      # --------------------
       - name: Pull ESPN results (yesterday Chicago)
-        if: steps.decide.outputs.task == 'results'
+        if: steps.decide.outputs.task == 'results' || steps.decide.outputs.task == 'all'
         run: |
           YDAY=$(TZ=America/Chicago date -d 'yesterday' +%Y%m%d)
-          python -m src.pipelines.run_espn_results_pull --db "${DB_PATH}" --date "$YDAY"
-
-      - name: Debug DB counts (after results pull)
-        if: steps.decide.outputs.task == 'results'
-        run: |
-          python - <<'PY'
-          import os, sqlite3
-          db = os.environ["DB_PATH"]
-          con = sqlite3.connect(db)
-          cur = con.cursor()
-          tables = ["raw_moneyline_odds","raw_espn_game_results","game_id_map","fact_game_results_best_market"]
-          print("DB:", db)
-          for t in tables:
-            try:
-              n = cur.execute(f"select count(*) from {t}").fetchone()[0]
-              print(f"{t}: {n}")
-            except Exception as e:
-              print(f"{t}: (missing) {e}")
-          con.close()
-          PY
+          python -m src.pipelines.run_espn_results_pull \
+            --db "${{ steps.db.outputs.db_target }}" \
+            --date "$YDAY"
 
       - name: Run transforms (build fact tables)
-        if: steps.decide.outputs.task == 'results'
+        if: steps.decide.outputs.task == 'results' || steps.decide.outputs.task == 'all'
+        env:
+          DBTARGET: ${{ steps.db.outputs.db_target }}
         run: |
           python - <<'PY'
           import os
           from src.pipelines.run_full_pipeline import run_transforms
-          run_transforms(os.environ["DB_PATH"], stake=1.0, calibration_step=0.05)
+          db = os.environ["DBTARGET"]
+          run_transforms(db, stake=1.0, calibration_step=0.05)
+          print("Transforms completed.")
           PY
 
-      - name: Debug DB counts (after transforms)
-        if: steps.decide.outputs.task == 'results'
+      # --------------------
+      # DEBUG COUNTS (SQLite only)
+      # --------------------
+      - name: Debug DB counts (SQLite only)
+        if: steps.db.outputs.mode == 'sqlite'
         run: |
           python - <<'PY'
           import os, sqlite3
-          db = os.environ["DB_PATH"]
+          db = os.environ["SQLITE_PATH"]
           con = sqlite3.connect(db)
           cur = con.cursor()
-          tables = ["raw_moneyline_odds","raw_espn_game_results","game_id_map","fact_game_results_best_market"]
+          tables = [
+            "raw_moneyline_odds",
+            "fact_best_market_moneyline_odds",
+            "raw_espn_game_results",
+            "game_id_map",
+            "fact_game_results_best_market",
+            "fact_strategy_equity_curve",
+          ]
           print("DB:", db)
           for t in tables:
             try:
@@ -171,29 +185,12 @@ jobs:
           con.close()
           PY
 
-      - name: Upload DB artifact
+      # --------------------
+      # ARTIFACT UPLOAD (SQLite only)
+      # --------------------
+      - name: Upload SQLite DB artifact (SQLite only)
+        if: steps.db.outputs.mode == 'sqlite'
         uses: actions/upload-artifact@v4
         with:
           name: demo_odds-sqlite-${{ steps.decide.outputs.task }}
-          path: ${{ env.DB_PATH }}
-
-      - name: Commit DB if changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add "${DB_PATH}" || true
-
-          if git diff --cached --quiet; then
-            echo "No DB changes to commit."
-            exit 0
-          fi
-
-          if [ "${{ steps.decide.outputs.task }}" = "odds" ]; then
-            git commit -m "chore: daily odds snapshot"
-          else
-            git commit -m "chore: daily results + transforms"
-          fi
-
-          # push back to the same branch that triggered this workflow
-          git push origin HEAD:${{ github.ref_name }}
+          path: ${{ env.SQLITE_PATH }}

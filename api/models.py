@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class OddsSnapshotRequest(BaseModel):
@@ -28,7 +28,11 @@ class CalibrationRequest(BaseModel):
 
 
 class ResultsRefreshRequest(BaseModel):
-    dates: List[str]  # ["YYYY-MM-DD", ...] (Chicago local day)
+    # UI sends YYYY-MM-DD strings (not YYYYMMDD)
+    dates: Optional[List[str]] = Field(
+        default=None,
+        description="List of YYYY-MM-DD. If omitted, defaults to yesterday & today (Chicago).",
+    )
     league: str = "nba"
     db: Optional[str] = None
 

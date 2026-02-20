@@ -4,11 +4,13 @@ import {
   getAnalyticsSummary,
   getStrategiesSummary,
   getStrategyEquity,
+  getStrategyRoiBuckets,
   type AnalyticsDailyRow,
   type AnalyticsSummary,
+  type RoiBucketRow,
+  type StrategyEquityPoint,
   type StrategyName,
   type StrategySummaryRow,
-  type StrategyEquityPoint,
 } from "../lib/api";
 import { ErrorBox } from "../components/ErrorBox";
 import EquityCurveChart from "../components/EquityCurveChart";
@@ -62,50 +64,67 @@ export default function AnalyticsPage() {
   const [strategyRows, setStrategyRows] = useState<StrategySummaryRow[]>([]);
   const [strategy, setStrategy] = useState<StrategyName>("favorite");
   const [equity, setEquity] = useState<StrategyEquityPoint[]>([]);
+  const [buckets, setBuckets] = useState<RoiBucketRow[]>([]);
+  const [nBetsInBuckets, setNBetsInBuckets] = useState<number>(0);
 
-  async function load() {
+  async function loadAll() {
     setLoading(true);
     setError(null);
 
     try {
-      const [s, d, stratSummary, stratEquity] = await Promise.all([
+      const [s, d, stratSummary, stratEquity, stratBuckets] = await Promise.all([
         getAnalyticsSummary(start, end),
         getAnalyticsDaily(start, end),
         getStrategiesSummary(start, end),
         getStrategyEquity(strategy, start, end),
+        getStrategyRoiBuckets(strategy, start, end),
       ]);
 
       setSummary(s);
       setDaily(d.daily);
 
       setStrategyRows(stratSummary.strategies);
+
       setEquity(stratEquity.equity);
+
+      setBuckets(stratBuckets.buckets);
+      setNBetsInBuckets(stratBuckets.n_bets_in_range);
     } catch (e) {
       setSummary(null);
       setDaily([]);
       setStrategyRows([]);
       setEquity([]);
+      setBuckets([]);
+      setNBetsInBuckets(0);
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadEquityOnly(next: StrategyName) {
+  async function loadStrategyOnly(next: StrategyName) {
     setStrategy(next);
     setError(null);
 
     try {
-      const resp = await getStrategyEquity(next, start, end);
-      setEquity(resp.equity);
+      const [eq, rb] = await Promise.all([
+        getStrategyEquity(next, start, end),
+        getStrategyRoiBuckets(next, start, end),
+      ]);
+
+      setEquity(eq.equity);
+      setBuckets(rb.buckets);
+      setNBetsInBuckets(rb.n_bets_in_range);
     } catch (e) {
       setEquity([]);
+      setBuckets([]);
+      setNBetsInBuckets(0);
       setError(e instanceof Error ? e.message : "Unknown error");
     }
   }
 
   useEffect(() => {
-    void load();
+    void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, end]);
 
@@ -114,15 +133,25 @@ export default function AnalyticsPage() {
       <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
         <label style={{ display: "grid", gap: 6 }}>
           <span style={{ fontSize: 12, opacity: 0.8 }}>Start</span>
-          <input type="date" value={start} onChange={(e) => setStart(e.target.value)} style={{ padding: 8 }} />
+          <input
+            type="date"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            style={{ padding: 8 }}
+          />
         </label>
 
         <label style={{ display: "grid", gap: 6 }}>
           <span style={{ fontSize: 12, opacity: 0.8 }}>End</span>
-          <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} style={{ padding: 8 }} />
+          <input
+            type="date"
+            value={end}
+            onChange={(e) => setEnd(e.target.value)}
+            style={{ padding: 8 }}
+          />
         </label>
 
-        <button onClick={load} disabled={loading} style={{ padding: "10px 14px" }}>
+        <button onClick={loadAll} disabled={loading} style={{ padding: "10px 14px" }}>
           {loading ? "Loading..." : "Reload Analytics"}
         </button>
       </div>
@@ -224,14 +253,16 @@ export default function AnalyticsPage() {
           {(["favorite", "underdog", "home", "away"] as StrategyName[]).map((s) => (
             <button
               key={s}
-              onClick={() => void loadEquityOnly(s)}
+              onClick={() => void loadStrategyOnly(s)}
               disabled={strategy === s || loading}
               style={{ padding: "8px 12px" }}
             >
               {stratLabel(s)}
             </button>
           ))}
-          <div style={{ fontSize: 12, opacity: 0.8, marginLeft: "auto" }}>Equity points: {equity.length}</div>
+          <div style={{ fontSize: 12, opacity: 0.8, marginLeft: "auto" }}>
+            Equity points: {equity.length} · Bets in buckets: {nBetsInBuckets}
+          </div>
         </div>
 
         {/* ROI buckets chart */}
@@ -240,6 +271,41 @@ export default function AnalyticsPage() {
           <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12 }}>
             <RoiBucketsChart strategy={strategy} start={start} end={end} />
           </div>
+        </div>
+
+        {/* ROI buckets table (optional but completes “end-to-end”) */}
+        <div style={{ marginTop: 12, overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={th}>Bucket</th>
+                <th style={th}>Bets</th>
+                <th style={th}>Wins</th>
+                <th style={th}>Win %</th>
+                <th style={th}>Profit</th>
+                <th style={th}>ROI ($1)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buckets.map((b) => (
+                <tr key={b.bucket}>
+                  <td style={td}>{b.bucket}</td>
+                  <td style={td}>{b.n_bets}</td>
+                  <td style={td}>{b.wins}</td>
+                  <td style={td}>{pct(b.win_rate)}</td>
+                  <td style={td}>{money(b.profit)}</td>
+                  <td style={td}>{money(b.roi)}</td>
+                </tr>
+              ))}
+              {buckets.length === 0 && (
+                <tr>
+                  <td style={td} colSpan={6}>
+                    No bucket data in this range.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
 
         {/* Equity table */}
@@ -275,9 +341,7 @@ export default function AnalyticsPage() {
           </table>
 
           {equity.length > 25 && (
-            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>
-              Showing first 25 points.
-            </div>
+            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>Showing first 25 points.</div>
           )}
         </div>
       </div>
