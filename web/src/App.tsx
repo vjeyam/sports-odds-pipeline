@@ -1,8 +1,17 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import GamesPage from "./pages/GamesPage";
-import AnalyticsPage from "./pages/AnalyticsPage";
 import { Tabs } from "./components/Tabs";
 import "./App.css";
+
+const AnalyticsPage = lazy(() => import("./pages/AnalyticsPage"));
+
+function PageLoading() {
+  return (
+    <div style={{ padding: 12, fontSize: 13, opacity: 0.85 }}>
+      Loading analytics…
+    </div>
+  );
+}
 
 export default function App() {
   const [tab, setTab] = useState<"games" | "analytics">("games");
@@ -22,7 +31,13 @@ export default function App() {
         />
       </div>
 
-      {tab === "games" ? <GamesPage /> : <AnalyticsPage />}
+      {tab === "games" ? (
+        <GamesPage />
+      ) : (
+        <Suspense fallback={<PageLoading />}>
+          <AnalyticsPage />
+        </Suspense>
+      )}
     </div>
   );
 }
