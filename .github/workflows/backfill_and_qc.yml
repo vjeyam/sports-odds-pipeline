@@ -1,0 +1,137 @@
+name: Backfill + QC (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many days to backfill (ending today Chicago)?"
+        required: true
+        default: "7"
+      end_date:
+        description: "End date (America/Chicago) in YYYYMMDD. Leave default for today."
+        required: true
+        default: ""
+      missing_results_hours:
+        description: "Flag odds games missing results after X hours"
+        required: true
+        default: "12"
+      fail_on_qc:
+        description: "Fail the run if QC fails?"
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      db_mode:
+        description: "DB mode: postgres uses DATABASE_URL secret; sqlite uses data/demo_odds.sqlite artifact"
+        required: true
+        default: "sqlite"
+        type: choice
+        options: ["sqlite", "postgres"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backfill-qc
+  cancel-in-progress: false
+
+jobs:
+  backfill_qc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SQLITE_PATH: ${{ github.workspace }}/data/demo_odds.sqlite
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Resolve DB target
+        id: db
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MODE="${{ inputs.db_mode }}"
+          if [ "$MODE" = "postgres" ]; then
+            if [ -z "${DATABASE_URL:-}" ]; then
+              echo "DATABASE_URL secret is required for postgres mode" >&2
+              exit 1
+            fi
+            echo "mode=postgres" >> "$GITHUB_OUTPUT"
+            echo "db_target=${DATABASE_URL}" >> "$GITHUB_OUTPUT"
+            echo "Using Postgres DATABASE_URL."
+          else
+            mkdir -p data
+            echo "mode=sqlite" >> "$GITHUB_OUTPUT"
+            echo "db_target=${SQLITE_PATH}" >> "$GITHUB_OUTPUT"
+            echo "Using SQLite at ${SQLITE_PATH}."
+          fi
+
+      - name: SQLite settings (CI-safe)
+        if: steps.db.outputs.mode == 'sqlite'
+        run: |
+          python - <<'PY'
+          import sqlite3, os
+          db = os.environ["SQLITE_PATH"]
+          con = sqlite3.connect(db)
+          con.execute("PRAGMA journal_mode=DELETE;")
+          con.execute("PRAGMA synchronous=FULL;")
+          con.commit()
+          con.close()
+          print("Configured SQLite for CI:", db)
+          PY
+
+      - name: Run backfill + transforms + QC
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DAYS="${{ inputs.days }}"
+          END_DATE="${{ inputs.end_date }}"
+          MISSING_HOURS="${{ inputs.missing_results_hours }}"
+          FAIL_ON_QC="${{ inputs.fail_on_qc }}"
+
+          EXTRA_FAIL=""
+          if [ "$FAIL_ON_QC" = "true" ]; then
+            EXTRA_FAIL="--fail-on-qc"
+          fi
+
+          EXTRA_END=""
+          if [ -n "$END_DATE" ]; then
+            EXTRA_END="--end-date $END_DATE"
+          fi
+
+          python -m src.pipelines.run_backfill_and_qc \
+            --db "${{ steps.db.outputs.db_target }}" \
+            --days "$DAYS" \
+            $EXTRA_END \
+            --missing-results-hours "$MISSING_HOURS" \
+            $EXTRA_FAIL
+
+      - name: Upload SQLite DB artifact (SQLite only)
+        if: steps.db.outputs.mode == 'sqlite'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backfill-qc-sqlite-db
+          path: ${{ env.SQLITE_PATH }}
+
+      - name: Upload SQLite DB artifact on failure (SQLite only)
+        if: failure() && steps.db.outputs.mode == 'sqlite'
+        uses: actions/upload-artifact@v4
+        with:
+          name: backfill-qc-sqlite-db-failed
+          path: ${{ env.SQLITE_PATH }}
