@@ -27,7 +27,20 @@ function statusLabel(row: GameRow) {
   return row.status ?? "Scheduled";
 }
 
+function rowKey(r: GameRow, idx: number) {
+  // Primary key
+  if (r.odds_event_id) return r.odds_event_id;
+
+  // Fallback: deterministic composite key (should rarely be needed)
+  const t = r.start_time ?? r.commence_time ?? "no-time";
+  const a = r.away_team ?? "no-away";
+  const h = r.home_team ?? "no-home";
+  return `${t}|${a}|${h}|${idx}`;
+}
+
 export function GamesTable({ rows }: { rows: GameRow[] }) {
+  const cleanRows = rows.filter(r => r?.odds_event_id && r.odds_event_id.trim().length > 0);
+
   return (
     <div style={{ marginTop: 16, overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -45,12 +58,12 @@ export function GamesTable({ rows }: { rows: GameRow[] }) {
         </thead>
 
         <tbody>
-          {rows.map((r) => {
+          {cleanRows.map((r, idx) => {
             const isFinal = r.completed === 1;
             const timeToShow = r.start_time ?? r.commence_time;
 
             return (
-              <tr key={r.odds_event_id}>
+              <tr key={rowKey(r, idx)}>
                 <td style={td}>{fmtTime(timeToShow)}</td>
                 <td style={td}>{r.away_team ?? "—"}</td>
                 <td style={td}>{r.home_team ?? "—"}</td>
@@ -65,6 +78,14 @@ export function GamesTable({ rows }: { rows: GameRow[] }) {
               </tr>
             );
           })}
+
+          {cleanRows.length === 0 && (
+            <tr>
+              <td style={td} colSpan={8}>
+                No games found for this date.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>

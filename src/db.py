@@ -221,8 +221,10 @@ def connect(db_path_or_url: Optional[str] = None):
     - SQLite: pass a filesystem path like "data/demo_odds.sqlite"
     - Postgres: pass a URL like "postgresql://user:pass@localhost:5432/dbname"
     """
-    target = db_path_or_url or os.getenv("DATABASE_URL") or "data/demo_odds.sqlite"
 
+    target = db_path_or_url or os.getenv("DATABASE_URL") or "odds.sqlite"
+    print("DB TARGET:", target)
+    
     if _is_postgres_target(target):
         if psycopg is None:
             raise RuntimeError(

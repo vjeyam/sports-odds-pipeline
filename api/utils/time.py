@@ -7,18 +7,34 @@ from zoneinfo import ZoneInfo
 
 
 def parse_iso_dt(s: str) -> datetime:
-    # Handles "Z" and "+00:00"
-    if s.endswith("Z"):
-        s = s[:-1] + "+00:00"
-    dt = datetime.fromisoformat(s)
+    """
+    Parse an ISO datetime string into an *aware* datetime in UTC.
+    Supports trailing 'Z' (Zulu) and '+00:00' offsets.
+    """
+    if not s:
+        raise ValueError("empty datetime string")
+
+    ss = s.strip()
+
+    # Handle Zulu suffix
+    if ss.endswith("Z"):
+        ss = ss[:-1] + "+00:00"
+
+    dt = datetime.fromisoformat(ss)
+
+    # If still naive, assume UTC (SQLite sometimes stores without offset)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt
+
+    # Normalize to UTC
+    return dt.astimezone(timezone.utc)
 
 
 def chicago_day_range(day: date_type) -> Tuple[datetime, datetime, ZoneInfo]:
     chi = ZoneInfo("America/Chicago")
-    start_local = datetime.combine(day, time.min).replace(tzinfo=chi)
+
+    # Build naive local midnight then attach tz via constructor (not replace)
+    start_local = datetime(day.year, day.month, day.day, 0, 0, 0, tzinfo=chi)
     end_local = start_local + timedelta(days=1)
     return start_local, end_local, chi
 

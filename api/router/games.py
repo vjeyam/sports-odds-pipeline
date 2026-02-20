@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date as date_type, timedelta
+from datetime import date as date_type, datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, Query
@@ -116,13 +116,12 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
 
     start_local, end_local, chi = chicago_day_range(day)
 
+    # Convert CT day bounds to UTC for a safe window prefilter in Python
+    utc_start = start_local.astimezone(timezone.utc)
+    utc_end = end_local.astimezone(timezone.utc)
+
     con = connect()
     cur = con.cursor()
-
-    # Chicago local day can span two UTC prefixes; pull small window then filter precisely in Python.
-    prev_day_str = (day - timedelta(days=1)).isoformat()
-    day_str = day.isoformat()
-    next_day_str = (day + timedelta(days=1)).isoformat()
 
     sql = """
     SELECT
@@ -168,11 +167,11 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
     ) r
       ON m.espn_event_id = r.espn_event_id
 
-    WHERE o.commence_time LIKE ? OR o.commence_time LIKE ? OR o.commence_time LIKE ?
+    WHERE o.commence_time IS NOT NULL
     ORDER BY o.commence_time
     """
 
-    cur.execute(sql, (f"{prev_day_str}%", f"{day_str}%", f"{next_day_str}%"))
+    cur.execute(sql)
     rows = rows_to_dicts(cur)
 
     filtered: List[Dict[str, Any]] = []
@@ -182,10 +181,21 @@ def api_games(date: str = Query(..., description="YYYY-MM-DD (Chicago local day)
             continue
         try:
             dt_utc = parse_iso_dt(ct)
-            dt_local = dt_utc.astimezone(chi)
         except Exception:
             continue
-        if start_local <= dt_local < end_local:
-            filtered.append(r)
 
+        # Fast UTC-window check first
+        if not (utc_start <= dt_utc < utc_end):
+            continue
+        filtered.append(r)
+
+        # (Optional redundancy) local check for DST safety / correctness
+        # try:
+        #     dt_local = dt_utc.astimezone(chi)
+        # except Exception:
+        #     continue
+        # if start_local <= dt_local < end_local:
+        #     filtered.append(r)
+    
+    # filtered.append({"__debug__": "NEW_CODE_IS_RUNNING"})
     return filtered
