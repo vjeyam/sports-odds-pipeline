@@ -1,0 +1,240 @@
+.analyticsPage {
+  display: grid;
+  gap: 16px;
+}
+
+.analyticsHeader {
+  display: grid;
+  gap: 6px;
+}
+
+.analyticsTitle {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.analyticsSubtitle {
+  font-size: 13px;
+  opacity: 0.85;
+  line-height: 1.4;
+}
+
+.card {
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.controlsRow {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.input {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.20);
+  color: inherit;
+}
+
+.btn {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.pill {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  opacity: 0.95;
+}
+
+/* --- KPI grid: always fills width nicely --- */
+.kpiGrid {
+  margin-top: 16px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+/* Force “6 across” on wide screens so there’s no empty area */
+@media (min-width: 1200px) {
+  .kpiGrid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+.kpiCard {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.kpiLabel {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.kpiValue {
+  font-size: 22px;
+  margin-top: 6px;
+  font-weight: 650;
+}
+
+.missingBox {
+  margin-top: 12px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+/* Sections */
+.section {
+  margin-top: 24px;
+  display: grid;
+  gap: 12px;
+}
+
+.sectionTitle {
+  margin: 0;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+/* Strategy toggle row */
+.toolbarRow {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.toolbarRowRight {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.03);
+}
+
+.segmentBtn {
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.segmentBtnActive {
+  background: rgba(255,255,255,0.10);
+  opacity: 1;
+}
+
+/* Chart layout modes */
+.chartsScroll {
+  display: grid;
+  gap: 12px;
+}
+
+.chartsTwoUp {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 980px) {
+  .chartsTwoUp {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.chartCard {
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.analyticsChartsGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 980px) {
+  .analyticsChartsGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.chartCard {
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.03);
+  padding: 12px;
+}
+
+.chartCardHeader {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.chartTitle {
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.chartSubtitle {
+  font-size: 12px;
+  opacity: 0.8;
+  line-height: 1.35;
+}
+
+.chartBody {
+  height: 320px;
+}

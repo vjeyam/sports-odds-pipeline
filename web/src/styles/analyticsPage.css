@@ -1,0 +1,162 @@
+/* Page layout */
+.apPage {
+  display: grid;
+  gap: 16px;
+}
+
+/* Header */
+.apHeader {
+  display: grid;
+  gap: 6px;
+}
+
+.apTitle {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.apSubtitle {
+  font-size: 13px;
+  opacity: 0.85;
+  line-height: 1.4;
+}
+
+/* Controls bar */
+.apControls {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.apField {
+  display: grid;
+  gap: 6px;
+}
+
+.apLabel {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.apDateInput {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.20);
+  color: inherit;
+}
+
+/* Buttons */
+.apBtn {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  cursor: pointer;
+}
+
+.apBtn:hover:enabled {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.apBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.apBtn--primary {
+  border: 1px solid rgba(52, 152, 219, 0.35);
+  background: rgba(52, 152, 219, 0.18);
+}
+
+.apBtn--primary:hover:enabled {
+  background: rgba(52, 152, 219, 0.24);
+}
+
+.apQuickRanges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Right side info */
+.apRight {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.apHintPill {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* KPI cards */
+.apKpiGrid {
+  margin-top: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.apCard {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.apCardLabel {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.apCardValue {
+  margin-top: 6px;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+}
+
+/* Sections */
+.apSection {
+  margin-top: 8px;
+  display: grid;
+  gap: 10px;
+}
+
+.apSectionTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.apSectionSub {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* Tables */
+.apTableWrap {
+  overflow-x: auto;
+}
+
+.apSubtleNote {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.8;
+}

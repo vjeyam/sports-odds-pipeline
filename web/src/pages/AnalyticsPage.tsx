@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getAnalyticsDaily,
   getAnalyticsSummary,
@@ -16,6 +16,8 @@ import { ErrorBox } from "../components/ErrorBox";
 import EquityCurveChart from "../components/EquityCurveChart";
 import RoiBucketsChart from "../components/RoiBucketsChart";
 import { th, td } from "../styles/ui";
+
+import "../styles/analytics.css";
 
 function todayISO(): string {
   const d = new Date();
@@ -51,6 +53,8 @@ function stratLabel(s: StrategyName) {
   return "Away";
 }
 
+type ChartsLayout = "scroll" | "two-up";
+
 export default function AnalyticsPage() {
   const [start, setStart] = useState(() => isoDaysAgo(7));
   const [end, setEnd] = useState(() => todayISO());
@@ -67,6 +71,11 @@ export default function AnalyticsPage() {
   const [buckets, setBuckets] = useState<RoiBucketRow[]>([]);
   const [nBetsInBuckets, setNBetsInBuckets] = useState<number>(0);
 
+  // view toggle for charts
+  const [chartsLayout, setChartsLayout] = useState<ChartsLayout>("scroll");
+
+  const rangeLabel = useMemo(() => `Range: ${start} → ${end}`, [start, end]);
+
   async function loadAll() {
     setLoading(true);
     setError(null);
@@ -82,11 +91,8 @@ export default function AnalyticsPage() {
 
       setSummary(s);
       setDaily(d.daily);
-
       setStrategyRows(stratSummary.strategies);
-
       setEquity(stratEquity.equity);
-
       setBuckets(stratBuckets.buckets);
       setNBetsInBuckets(stratBuckets.n_bets_in_range);
     } catch (e) {
@@ -107,11 +113,7 @@ export default function AnalyticsPage() {
     setError(null);
 
     try {
-      const [eq, rb] = await Promise.all([
-        getStrategyEquity(next, start, end),
-        getStrategyRoiBuckets(next, start, end),
-      ]);
-
+      const [eq, rb] = await Promise.all([getStrategyEquity(next, start, end), getStrategyRoiBuckets(next, start, end)]);
       setEquity(eq.equity);
       setBuckets(rb.buckets);
       setNBetsInBuckets(rb.n_bets_in_range);
@@ -123,96 +125,131 @@ export default function AnalyticsPage() {
     }
   }
 
+  function quickRange(days: number) {
+    setStart(isoDaysAgo(days));
+    setEnd(todayISO());
+  }
+
   useEffect(() => {
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, end]);
 
+  const chartsClass = chartsLayout === "two-up" ? "chartsTwoUp" : "chartsScroll";
+
   return (
-    <div>
-      <div style={{ display: "flex", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
-        <label style={{ display: "grid", gap: 6 }}>
-          <span style={{ fontSize: 12, opacity: 0.8 }}>Start</span>
-          <input
-            type="date"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            style={{ padding: 8 }}
-          />
-        </label>
+    <div className="analyticsPage">
+      {/* Header */}
+      <div className="analyticsHeader">
+        <div className="analyticsTitle">Analytics</div>
+        <div className="analyticsSubtitle">
+          This page summarizes outcomes and simple strategy performance for the selected date range. ROI assumes a <b>$1 stake</b> per game.
+        </div>
+      </div>
 
-        <label style={{ display: "grid", gap: 6 }}>
-          <span style={{ fontSize: 12, opacity: 0.8 }}>End</span>
-          <input
-            type="date"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-            style={{ padding: 8 }}
-          />
-        </label>
+      {/* Controls */}
+      <div className="card">
+        <div className="controlsRow">
+          <label className="field">
+            <span className="fieldLabel">Start</span>
+            <input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+          </label>
 
-        <button onClick={loadAll} disabled={loading} style={{ padding: "10px 14px" }}>
-          {loading ? "Loading..." : "Reload Analytics"}
-        </button>
+          <label className="field">
+            <span className="fieldLabel">End</span>
+            <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+          </label>
+
+          <button className="btn" onClick={loadAll} disabled={loading}>
+            {loading ? "Loading..." : "Reload Analytics"}
+          </button>
+
+          <button className="btn btnGhost" onClick={() => quickRange(7)} disabled={loading}>
+            Last 7d
+          </button>
+          <button className="btn btnGhost" onClick={() => quickRange(14)} disabled={loading}>
+            Last 14d
+          </button>
+          <button className="btn btnGhost" onClick={() => quickRange(30)} disabled={loading}>
+            Last 30d
+          </button>
+
+          <div className="toolbarRowRight">
+            <span className="pill">{rangeLabel}</span>
+
+            <div className="segmented" title="Change how charts are laid out">
+              <button
+                className={`segmentBtn ${chartsLayout === "scroll" ? "segmentBtnActive" : ""}`}
+                onClick={() => setChartsLayout("scroll")}
+                type="button"
+              >
+                Scroll
+              </button>
+              <button
+                className={`segmentBtn ${chartsLayout === "two-up" ? "segmentBtnActive" : ""}`}
+                onClick={() => setChartsLayout("two-up")}
+                type="button"
+              >
+                2-up charts
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <ErrorBox error={error} />
 
+      {/* KPI cards */}
       {summary && (
         <>
-          <div
-            style={{
-              marginTop: 16,
-              display: "grid",
-              gap: 12,
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            }}
-          >
-            <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>Games (odds)</div>
-              <div style={{ fontSize: 20 }}>{summary.n_games_with_odds}</div>
+          <div className="kpiGrid">
+            <div className="kpiCard">
+              <div className="kpiLabel">Games with odds</div>
+              <div className="kpiValue">{summary.n_games_with_odds}</div>
             </div>
 
-            <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>Decided games</div>
-              <div style={{ fontSize: 20 }}>{summary.n_decided_games}</div>
+            <div className="kpiCard">
+              <div className="kpiLabel">Decided games</div>
+              <div className="kpiValue">{summary.n_decided_games}</div>
             </div>
 
-            <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>Favorite win rate</div>
-              <div style={{ fontSize: 20 }}>{pct(summary.favorite_win_rate)}</div>
+            <div className="kpiCard">
+              <div className="kpiLabel">Favorite win rate</div>
+              <div className="kpiValue">{pct(summary.favorite_win_rate)}</div>
             </div>
 
-            <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>Underdog win rate</div>
-              <div style={{ fontSize: 20 }}>{pct(summary.underdog_win_rate)}</div>
+            <div className="kpiCard">
+              <div className="kpiLabel">Underdog win rate</div>
+              <div className="kpiValue">{pct(summary.underdog_win_rate)}</div>
             </div>
 
-            <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>Favorite ROI ($1)</div>
-              <div style={{ fontSize: 20 }}>{money(summary.favorite_roi)}</div>
+            <div className="kpiCard">
+              <div className="kpiLabel">Favorite ROI ($1)</div>
+              <div className="kpiValue">{money(summary.favorite_roi)}</div>
             </div>
 
-            <div style={{ border: "1px solid #eee", padding: 12, borderRadius: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8 }}>Underdog ROI ($1)</div>
-              <div style={{ fontSize: 20 }}>{money(summary.underdog_roi)}</div>
+            <div className="kpiCard">
+              <div className="kpiLabel">Underdog ROI ($1)</div>
+              <div className="kpiValue">{money(summary.underdog_roi)}</div>
             </div>
           </div>
 
           {summary.missing_dates.length > 0 && (
-            <div style={{ marginTop: 16, padding: 12, border: "1px solid #eee", borderRadius: 8 }}>
-              <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 6 }}>No games found in DB for:</div>
-              <div style={{ fontFamily: "monospace", fontSize: 12 }}>{summary.missing_dates.join(", ")}</div>
+            <div className={`card missingBox`}>
+              <div className="kpiLabel" style={{ marginBottom: 6 }}>
+                No games found in DB for:
+              </div>
+              <div className="mono">{summary.missing_dates.join(", ")}</div>
             </div>
           )}
         </>
       )}
 
       {/* Strategy Performance */}
-      <div style={{ marginTop: 24 }}>
-        <h3 style={{ margin: "0 0 8px 0" }}>Strategy Performance</h3>
+      <div className="section">
+        <h3 className="sectionTitle">Strategy Performance</h3>
 
-        <div style={{ marginTop: 8, overflowX: "auto" }}>
+        <div className="tableWrap">
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
@@ -239,42 +276,52 @@ export default function AnalyticsPage() {
           </table>
         </div>
 
-        {/* Equity Curve chart (Favorite vs Underdog) */}
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ margin: "0 0 8px 0" }}>Equity Curve (Favorite vs Underdog)</h4>
-          <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12 }}>
-            <EquityCurveChart start={start} end={end} />
+        {/* Strategy toggle row */}
+        <div className="toolbarRow">
+          <div className="pill">
+            Strategy view: <b>{stratLabel(strategy)}</b>
           </div>
-        </div>
 
-        {/* Strategy toggle controls (drives equity table + ROI buckets chart) */}
-        <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ fontSize: 12, opacity: 0.8 }}>Strategy:</div>
           {(["favorite", "underdog", "home", "away"] as StrategyName[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => void loadStrategyOnly(s)}
-              disabled={strategy === s || loading}
-              style={{ padding: "8px 12px" }}
-            >
+            <button key={s} className="btn" onClick={() => void loadStrategyOnly(s)} disabled={strategy === s || loading} type="button">
               {stratLabel(s)}
             </button>
           ))}
-          <div style={{ fontSize: 12, opacity: 0.8, marginLeft: "auto" }}>
-            Equity points: {equity.length} · Bets in buckets: {nBetsInBuckets}
+
+          <div className="toolbarRowRight">
+            <span className="pill">
+              Equity points: <b>{equity.length}</b> · Bets in buckets: <b>{nBetsInBuckets}</b>
+            </span>
           </div>
         </div>
 
-        {/* ROI buckets chart */}
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ margin: "0 0 8px 0" }}>ROI by Implied Probability Bucket ({stratLabel(strategy)})</h4>
-          <div style={{ border: "1px solid #eee", borderRadius: 8, padding: 12 }}>
-            <RoiBucketsChart strategy={strategy} start={start} end={end} />
+        {/* Charts layout */}
+        <div className={chartsClass}>
+          <div className="chartCard">
+            <div className="chartCardHeader">
+              <div className="chartTitle">Equity Curve (Favorite vs Underdog)</div>
+              <div className="chartSubtitle">Cumulative profit over time (one $1 bet per decided game).</div>
+            </div>
+            <div className="chartBody">
+              <EquityCurveChart start={start} end={end} />
+            </div>
+          </div>
+
+          <div className="chartCard">
+            <div className="chartCardHeader">
+              <div className="chartTitle">ROI by Implied Probability Bucket ({stratLabel(strategy)})</div>
+              <div className="chartSubtitle">
+                Buckets group games by implied win probability (from odds). Above 0 is profitable, below 0 is unprofitable.
+              </div>
+            </div>
+            <div className="chartBody">
+              <RoiBucketsChart strategy={strategy} start={start} end={end} />
+            </div>
           </div>
         </div>
 
-        {/* ROI buckets table (optional but completes “end-to-end”) */}
-        <div style={{ marginTop: 12, overflowX: "auto" }}>
+        {/* ROI buckets table */}
+        <div className="tableWrap">
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
@@ -309,7 +356,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Equity table */}
-        <div style={{ marginTop: 12, overflowX: "auto" }}>
+        <div className="tableWrap">
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
@@ -340,41 +387,41 @@ export default function AnalyticsPage() {
             </tbody>
           </table>
 
-          {equity.length > 25 && (
-            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>Showing first 25 points.</div>
-          )}
+          {equity.length > 25 && <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>Showing first 25 points.</div>}
         </div>
       </div>
 
       {/* Daily table */}
-      <div style={{ marginTop: 24, overflowX: "auto" }}>
-        <h3 style={{ margin: "0 0 8px 0" }}>Daily</h3>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={th}>Date</th>
-              <th style={th}>Games (odds)</th>
-              <th style={th}>Decided</th>
-              <th style={th}>Fav win%</th>
-              <th style={th}>Dog win%</th>
-              <th style={th}>Fav ROI</th>
-              <th style={th}>Dog ROI</th>
-            </tr>
-          </thead>
-          <tbody>
-            {daily.map((d) => (
-              <tr key={d.date}>
-                <td style={td}>{d.date}</td>
-                <td style={td}>{d.n_games_with_odds}</td>
-                <td style={td}>{d.n_decided_games}</td>
-                <td style={td}>{pct(d.favorite_win_rate)}</td>
-                <td style={td}>{pct(d.underdog_win_rate)}</td>
-                <td style={td}>{money(d.favorite_roi)}</td>
-                <td style={td}>{money(d.underdog_roi)}</td>
+      <div className="section">
+        <h3 className="sectionTitle">Daily</h3>
+        <div className="tableWrap">
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={th}>Date</th>
+                <th style={th}>Games (odds)</th>
+                <th style={th}>Decided</th>
+                <th style={th}>Fav win%</th>
+                <th style={th}>Dog win%</th>
+                <th style={th}>Fav ROI</th>
+                <th style={th}>Dog ROI</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {daily.map((d) => (
+                <tr key={d.date}>
+                  <td style={td}>{d.date}</td>
+                  <td style={td}>{d.n_games_with_odds}</td>
+                  <td style={td}>{d.n_decided_games}</td>
+                  <td style={td}>{pct(d.favorite_win_rate)}</td>
+                  <td style={td}>{pct(d.underdog_win_rate)}</td>
+                  <td style={td}>{money(d.favorite_roi)}</td>
+                  <td style={td}>{money(d.underdog_roi)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
