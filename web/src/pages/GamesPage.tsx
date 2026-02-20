@@ -12,9 +12,23 @@ function todayISO(): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function hasLiveGames(rows: GameRow[]) {
-  return rows.some((r) => (r.status ?? "Scheduled") === "In Progress");
+function isLive(r: GameRow) {
+  return (r.status ?? "Scheduled") === "In Progress";
 }
+
+function isFinal(r: GameRow) {
+  return r.completed === 1 || (r.status ?? "") === "Final";
+}
+
+function isScheduled(r: GameRow) {
+  return !isLive(r) && !isFinal(r);
+}
+
+function hasLiveGames(rows: GameRow[]) {
+  return rows.some(isLive);
+}
+
+type StatusFilter = "all" | "final" | "live" | "scheduled";
 
 export default function GamesPage() {
   const [date, setDate] = useState(todayISO());
@@ -24,15 +38,36 @@ export default function GamesPage() {
   const [oddsRefreshing, setOddsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // NEW: search + status filter
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
   const loadingRef = useRef(false);
   const live = hasLiveGames(rows);
 
   const stats = useMemo(() => {
     const total = rows.length;
-    const completed = rows.filter((r) => r.completed === 1).length;
-    const inProgress = rows.filter((r) => (r.status ?? "Scheduled") === "In Progress").length;
+    const completed = rows.filter((r) => isFinal(r)).length;
+    const inProgress = rows.filter((r) => isLive(r)).length;
     return { total, completed, inProgress };
   }, [rows]);
+
+  const filteredRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+
+    return rows.filter((r) => {
+      // status filter
+      if (statusFilter === "final" && !isFinal(r)) return false;
+      if (statusFilter === "live" && !isLive(r)) return false;
+      if (statusFilter === "scheduled" && !isScheduled(r)) return false;
+
+      // search filter
+      if (!q) return true;
+      const home = (r.home_team ?? "").toLowerCase();
+      const away = (r.away_team ?? "").toLowerCase();
+      return home.includes(q) || away.includes(q);
+    });
+  }, [rows, query, statusFilter]);
 
   async function load() {
     if (loadingRef.current) return;
@@ -82,6 +117,7 @@ export default function GamesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [date]);
 
+  // Auto-refresh only when live games exist
   useEffect(() => {
     if (!hasLiveGames(rows)) return;
 
@@ -116,8 +152,34 @@ export default function GamesPage() {
           />
         </label>
 
+        {/* NEW: Search */}
+        <label className="gpField">
+          <span className="gpLabel">Search team</span>
+          <input
+            className="gpTextInput"
+            placeholder="e.g. Lakers"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </label>
+
+        {/* NEW: Status filter */}
+        <label className="gpField">
+          <span className="gpLabel">Status</span>
+          <select
+            className="gpSelect"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+          >
+            <option value="all">All</option>
+            <option value="final">Final</option>
+            <option value="live">Live</option>
+            <option value="scheduled">Scheduled</option>
+          </select>
+        </label>
+
         <button
-          className="gpBtn"
+          className="gpBtn gpBtn--primary"
           onClick={onRefreshResults}
           disabled={loading || refreshing}
           title="Runs results ETL for the selected date"
@@ -143,7 +205,7 @@ export default function GamesPage() {
             </div>
           )}
 
-          <div className="gpStats">
+          <div className="gpStats" title="Counts are for the full date (not filtered)">
             <span>
               Games: <b>{stats.total}</b>
             </span>
@@ -154,11 +216,18 @@ export default function GamesPage() {
               Live: <b>{stats.inProgress}</b>
             </span>
           </div>
+
+          {/* NEW: filtered count (super helpful) */}
+          <div className="gpStats" title="Filtered rows shown below">
+            <span>
+              Showing: <b>{filteredRows.length}</b>
+            </span>
+          </div>
         </div>
       </div>
 
       <ErrorBox error={error} />
-      <GamesTable rows={rows} loading={loading} />
+      <GamesTable rows={filteredRows} loading={loading} />
     </div>
   );
 }

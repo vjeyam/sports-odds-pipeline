@@ -45,12 +45,22 @@
   opacity: 0.8;
 }
 
-.gpDateInput {
+.gpDateInput,
+.gpTextInput,
+.gpSelect {
   padding: 10px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(0, 0, 0, 0.20);
   color: inherit;
+}
+
+.gpTextInput {
+  min-width: 240px;
+}
+
+.gpSelect {
+  min-width: 160px;
 }
 
 /* Buttons */
@@ -63,9 +73,23 @@
   cursor: pointer;
 }
 
+.gpBtn:hover:enabled {
+  background: rgba(255, 255, 255, 0.09);
+}
+
 .gpBtn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* Primary button */
+.gpBtn--primary {
+  border: 1px solid rgba(52, 152, 219, 0.35);
+  background: rgba(52, 152, 219, 0.18);
+}
+
+.gpBtn--primary:hover:enabled {
+  background: rgba(52, 152, 219, 0.24);
 }
 
 /* Right-side status */
