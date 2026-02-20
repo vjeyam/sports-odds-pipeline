@@ -24,9 +24,6 @@ public class EtlController {
         this.pythonBaseUrl = pythonBaseUrl;
     }
 
-    // =========================
-    // Existing Odds Snapshot
-    // =========================
     @PostMapping("/api/etl/odds-snapshot")
     public Object runOddsSnapshot(@RequestBody(required = false) Map<String, Object> body) {
         Map<String, Object> payload = (body == null) ? Map.of() : body;
@@ -38,10 +35,6 @@ public class EtlController {
                 .retrieve()
                 .body(Object.class);
     }
-
-    // =========================
-    // NEW: Results Refresh
-    // =========================
 
     public record ResultsRefreshRequest(
             List<String> dates,
@@ -60,7 +53,7 @@ public class EtlController {
                 ? req.step()
                 : 0.05;
 
-        // 1) Pull ESPN Results
+        // Pull ESPN Results
         Map<String, Object> espnPayload = new HashMap<>();
         espnPayload.put("league", league);
         if (req != null && req.dates() != null && !req.dates().isEmpty()) {
@@ -74,7 +67,7 @@ public class EtlController {
                 .retrieve()
                 .body(Object.class);
 
-        // 2) Build game_id_map
+        // Build game_id_map
         Object mapped = restClient.post()
                 .uri(URI.create(pythonBaseUrl + "/jobs/build-game-id-map"))
                 .contentType(MediaType.APPLICATION_JSON)
@@ -82,7 +75,7 @@ public class EtlController {
                 .retrieve()
                 .body(Object.class);
 
-        // 3) Build joined fact
+        // Build joined fact
         Object joined = restClient.post()
                 .uri(URI.create(pythonBaseUrl + "/jobs/build-fact-game-results-best-market"))
                 .contentType(MediaType.APPLICATION_JSON)
@@ -90,7 +83,7 @@ public class EtlController {
                 .retrieve()
                 .body(Object.class);
 
-        // 4) Build calibration
+        // Build calibration
         Object calibration = restClient.post()
                 .uri(URI.create(pythonBaseUrl + "/jobs/build-calibration-favorite"))
                 .contentType(MediaType.APPLICATION_JSON)

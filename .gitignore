@@ -4,6 +4,7 @@ notes.txt
 # Ignore Python bytecode files and virtual environment
 __pycache__/
 .vscode
+.mypy_cache
 .DS_Store
 java-api/.gradle
 
