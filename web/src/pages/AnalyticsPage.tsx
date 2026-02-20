@@ -15,9 +15,13 @@ import {
 import { ErrorBox } from "../components/ErrorBox";
 import EquityCurveChart from "../components/EquityCurveChart";
 import RoiBucketsChart from "../components/RoiBucketsChart";
+import StrategyEquityChart from "../components/StrategyEquityChart";
+import DailyRoiChart from "../components/DailyRoiChart";
 import { th, td } from "../styles/ui";
 
 import "../styles/analytics.css";
+
+const MIN_DATE = "2026-02-19"; // earliest allowed date (local ISO YYYY-MM-DD)
 
 function todayISO(): string {
   const d = new Date();
@@ -34,6 +38,13 @@ function isoDaysAgo(n: number): string {
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function clampISODate(d: string, min: string, max: string): string {
+  if (!d) return min;
+  if (d < min) return min;
+  if (d > max) return max;
+  return d;
 }
 
 function pct(x: number | null) {
@@ -56,8 +67,19 @@ function stratLabel(s: StrategyName) {
 type ChartsLayout = "scroll" | "two-up";
 
 export default function AnalyticsPage() {
-  const [start, setStart] = useState(() => isoDaysAgo(7));
-  const [end, setEnd] = useState(() => todayISO());
+  const maxDate = todayISO();
+
+  // Default start = max(MIN_DATE, today-7)
+  const defaultStart = useMemo(() => {
+    const s = isoDaysAgo(7);
+    return s < MIN_DATE ? MIN_DATE : s;
+  }, []);
+  const defaultEnd = useMemo(() => {
+    return maxDate < MIN_DATE ? MIN_DATE : maxDate;
+  }, [maxDate]);
+
+  const [start, setStart] = useState(() => defaultStart);
+  const [end, setEnd] = useState(() => defaultEnd);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,17 +98,17 @@ export default function AnalyticsPage() {
 
   const rangeLabel = useMemo(() => `Range: ${start} → ${end}`, [start, end]);
 
-  async function loadAll() {
+  async function loadAll(nextStart = start, nextEnd = end, nextStrategy = strategy) {
     setLoading(true);
     setError(null);
 
     try {
       const [s, d, stratSummary, stratEquity, stratBuckets] = await Promise.all([
-        getAnalyticsSummary(start, end),
-        getAnalyticsDaily(start, end),
-        getStrategiesSummary(start, end),
-        getStrategyEquity(strategy, start, end),
-        getStrategyRoiBuckets(strategy, start, end),
+        getAnalyticsSummary(nextStart, nextEnd),
+        getAnalyticsDaily(nextStart, nextEnd),
+        getStrategiesSummary(nextStart, nextEnd),
+        getStrategyEquity(nextStrategy, nextStart, nextEnd),
+        getStrategyRoiBuckets(nextStrategy, nextStart, nextEnd),
       ]);
 
       setSummary(s);
@@ -113,7 +135,10 @@ export default function AnalyticsPage() {
     setError(null);
 
     try {
-      const [eq, rb] = await Promise.all([getStrategyEquity(next, start, end), getStrategyRoiBuckets(next, start, end)]);
+      const [eq, rb] = await Promise.all([
+        getStrategyEquity(next, start, end),
+        getStrategyRoiBuckets(next, start, end),
+      ]);
       setEquity(eq.equity);
       setBuckets(rb.buckets);
       setNBetsInBuckets(rb.n_bets_in_range);
@@ -126,10 +151,34 @@ export default function AnalyticsPage() {
   }
 
   function quickRange(days: number) {
-    setStart(isoDaysAgo(days));
-    setEnd(todayISO());
+    const max = todayISO();
+    const rawStart = isoDaysAgo(days);
+    const nextStart = clampISODate(rawStart, MIN_DATE, max);
+    const nextEnd = clampISODate(max, MIN_DATE, max);
+
+    // If nextStart somehow ends up after end, clamp it
+    const finalStart = nextStart > nextEnd ? nextEnd : nextStart;
+
+    setStart(finalStart);
+    setEnd(nextEnd);
   }
 
+  // Keep start/end always clamped (covers manual typing)
+  useEffect(() => {
+    const max = todayISO();
+
+    const clampedStart = clampISODate(start, MIN_DATE, max);
+    const clampedEnd = clampISODate(end, MIN_DATE, max);
+
+    // Ensure start <= end
+    const finalStart = clampedStart > clampedEnd ? clampedEnd : clampedStart;
+
+    if (finalStart !== start) setStart(finalStart);
+    if (clampedEnd !== end) setEnd(clampedEnd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start, end]);
+
+  // Load whenever range changes
   useEffect(() => {
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -152,15 +201,39 @@ export default function AnalyticsPage() {
         <div className="controlsRow">
           <label className="field">
             <span className="fieldLabel">Start</span>
-            <input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+            <input
+              className="input"
+              type="date"
+              value={start}
+              min={MIN_DATE}
+              max={maxDate}
+              onChange={(e) => {
+                const max = todayISO();
+                const next = clampISODate(e.target.value, MIN_DATE, max);
+                // keep start <= end
+                setStart(next > end ? end : next);
+              }}
+            />
           </label>
 
           <label className="field">
             <span className="fieldLabel">End</span>
-            <input className="input" type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+            <input
+              className="input"
+              type="date"
+              value={end}
+              min={MIN_DATE}
+              max={maxDate}
+              onChange={(e) => {
+                const max = todayISO();
+                const next = clampISODate(e.target.value, MIN_DATE, max);
+                // keep start <= end
+                setEnd(next < start ? start : next);
+              }}
+            />
           </label>
 
-          <button className="btn" onClick={loadAll} disabled={loading}>
+          <button className="btn" onClick={() => void loadAll()} disabled={loading}>
             {loading ? "Loading..." : "Reload Analytics"}
           </button>
 
@@ -283,7 +356,13 @@ export default function AnalyticsPage() {
           </div>
 
           {(["favorite", "underdog", "home", "away"] as StrategyName[]).map((s) => (
-            <button key={s} className="btn" onClick={() => void loadStrategyOnly(s)} disabled={strategy === s || loading} type="button">
+            <button
+              key={s}
+              className="btn"
+              onClick={() => void loadStrategyOnly(s)}
+              disabled={strategy === s || loading}
+              type="button"
+            >
               {stratLabel(s)}
             </button>
           ))}
@@ -295,7 +374,7 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* Charts layout */}
+        {/* Charts row 1 */}
         <div className={chartsClass}>
           <div className="chartCard">
             <div className="chartCardHeader">
@@ -320,107 +399,27 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* ROI buckets table */}
-        <div className="tableWrap">
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={th}>Bucket</th>
-                <th style={th}>Bets</th>
-                <th style={th}>Wins</th>
-                <th style={th}>Win %</th>
-                <th style={th}>Profit</th>
-                <th style={th}>ROI ($1)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {buckets.map((b) => (
-                <tr key={b.bucket}>
-                  <td style={td}>{b.bucket}</td>
-                  <td style={td}>{b.n_bets}</td>
-                  <td style={td}>{b.wins}</td>
-                  <td style={td}>{pct(b.win_rate)}</td>
-                  <td style={td}>{money(b.profit)}</td>
-                  <td style={td}>{money(b.roi)}</td>
-                </tr>
-              ))}
-              {buckets.length === 0 && (
-                <tr>
-                  <td style={td} colSpan={6}>
-                    No bucket data in this range.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        {/* Charts row 2 */}
+        <div className={chartsClass} style={{ marginTop: 12 }}>
+          <div className="chartCard">
+            <div className="chartCardHeader">
+              <div className="chartTitle">Selected Strategy Equity ({stratLabel(strategy)})</div>
+              <div className="chartSubtitle">Cumulative P/L for the currently selected strategy.</div>
+            </div>
+            <div className="chartBody">
+              <StrategyEquityChart strategy={strategy} equity={equity} />
+            </div>
+          </div>
 
-        {/* Equity table */}
-        <div className="tableWrap">
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={th}>#</th>
-                <th style={th}>Commence</th>
-                <th style={th}>Bet P/L</th>
-                <th style={th}>Cum P/L</th>
-                <th style={th}>Cum ROI</th>
-              </tr>
-            </thead>
-            <tbody>
-              {equity.slice(0, 25).map((p) => (
-                <tr key={p.game_index}>
-                  <td style={td}>{p.game_index}</td>
-                  <td style={td}>{p.commence_time ?? "—"}</td>
-                  <td style={td}>{money(p.bet_profit)}</td>
-                  <td style={td}>{money(p.cum_profit)}</td>
-                  <td style={td}>{p.cum_roi == null ? "—" : pct(p.cum_roi)}</td>
-                </tr>
-              ))}
-              {equity.length === 0 && (
-                <tr>
-                  <td style={td} colSpan={5}>
-                    No decided games in this range yet (equity builds only after winners exist).
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-
-          {equity.length > 25 && <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8 }}>Showing first 25 points.</div>}
-        </div>
-      </div>
-
-      {/* Daily table */}
-      <div className="section">
-        <h3 className="sectionTitle">Daily</h3>
-        <div className="tableWrap">
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={th}>Date</th>
-                <th style={th}>Games (odds)</th>
-                <th style={th}>Decided</th>
-                <th style={th}>Fav win%</th>
-                <th style={th}>Dog win%</th>
-                <th style={th}>Fav ROI</th>
-                <th style={th}>Dog ROI</th>
-              </tr>
-            </thead>
-            <tbody>
-              {daily.map((d) => (
-                <tr key={d.date}>
-                  <td style={td}>{d.date}</td>
-                  <td style={td}>{d.n_games_with_odds}</td>
-                  <td style={td}>{d.n_decided_games}</td>
-                  <td style={td}>{pct(d.favorite_win_rate)}</td>
-                  <td style={td}>{pct(d.underdog_win_rate)}</td>
-                  <td style={td}>{money(d.favorite_roi)}</td>
-                  <td style={td}>{money(d.underdog_roi)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="chartCard">
+            <div className="chartCardHeader">
+              <div className="chartTitle">Daily Trend</div>
+              <div className="chartSubtitle">Switch between ROI and estimated profit.</div>
+            </div>
+            <div className="chartBody">
+              <DailyRoiChart daily={daily} />
+            </div>
+          </div>
         </div>
       </div>
     </div>
