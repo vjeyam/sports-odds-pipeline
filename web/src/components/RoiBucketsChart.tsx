@@ -84,7 +84,7 @@ export default function RoiBucketsChart({
 
   const POS = "rgba(96, 165, 250, 0.75)"; // muted blue
   const NEG = "rgba(248, 113, 113, 0.75)"; // muted red
-  const BETS = "rgba(255,255,255,0.22)";   // muted gray
+  const BETS = "rgba(255,255,255,0.22)"; // muted gray
 
   return (
     <div style={{ width: "100%", height: "100%", position: "relative" }}>
@@ -119,24 +119,15 @@ export default function RoiBucketsChart({
           <XAxis dataKey="bucket" tick={{ fontSize: 12 }} />
 
           {/* Left axis = ROI */}
-          <YAxis
-            yAxisId="roi"
-            tick={{ fontSize: 12 }}
-            tickFormatter={(v) => fmt(v, 2)}
-          />
+          <YAxis yAxisId="roi" tick={{ fontSize: 12 }} tickFormatter={(v) => fmt(v, 2)} />
 
           {/* Right axis = Bets */}
-          <YAxis
-            yAxisId="bets"
-            orientation="right"
-            tick={{ fontSize: 12, opacity: 0.85 }}
-            allowDecimals={false}
-          />
+          <YAxis yAxisId="bets" orientation="right" tick={{ fontSize: 12, opacity: 0.85 }} allowDecimals={false} />
 
           <Tooltip
             contentStyle={{ fontSize: 12 }}
             labelFormatter={(label) => `Bucket: ${label}`}
-            formatter={(value: any, name: any, payload: any) => {
+            formatter={(value: any, name: any) => {
               if (name === "roi") return [fmt(value, 3), "ROI"];
               if (name === "n_bets") return [String(value), "Bets"];
               return [String(value), String(name)];
@@ -151,23 +142,10 @@ export default function RoiBucketsChart({
           />
 
           {/* Bets series (muted, right axis). Draw first so ROI sits on top. */}
-          <Bar
-            dataKey="n_bets"
-            yAxisId="bets"
-            name="n_bets"
-            fill={BETS}
-            radius={[6, 6, 0, 0]}
-            barSize={18}
-          />
+          <Bar dataKey="n_bets" yAxisId="bets" name="n_bets" fill={BETS} radius={[6, 6, 0, 0]} barSize={18} />
 
           {/* ROI series (colored, left axis) */}
-          <Bar
-            dataKey="roi"
-            yAxisId="roi"
-            name="roi"
-            radius={[6, 6, 0, 0]}
-            barSize={32}
-          >
+          <Bar dataKey="roi" yAxisId="roi" name="roi" radius={[6, 6, 0, 0]} barSize={32}>
             {data.map((entry, idx) => (
               <Cell key={`cell-${idx}`} fill={entry.roi >= 0 ? POS : NEG} />
             ))}
@@ -258,9 +236,7 @@ export default function RoiBucketsChart({
               </table>
             </div>
 
-            <div style={{ marginTop: 8, opacity: 0.75, fontSize: 11 }}>
-              Tip: click outside the panel to close.
-            </div>
+            <div style={{ marginTop: 8, opacity: 0.75, fontSize: 11 }}>Tip: click outside the panel to close.</div>
           </div>
         </div>
       )}

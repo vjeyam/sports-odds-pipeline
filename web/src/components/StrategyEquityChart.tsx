@@ -61,8 +61,7 @@ export default function StrategyEquityChart({
     return <div style={{ fontSize: 12, opacity: 0.85 }}>No equity points in this range yet.</div>;
   }
 
-  // Muted single line color; keeps dashboard calm
-  const LINE = "rgba(96, 165, 250, 0.80)";
+  const LINE = "rgba(96, 165, 250, 0.80)"; // muted blue
 
   return (
     <div style={{ width: "100%", height: "100%" }}>
@@ -74,7 +73,7 @@ export default function StrategyEquityChart({
           <YAxis tick={{ fontSize: 12 }} />
           <Tooltip
             labelFormatter={(label) => `${stratLabel(strategy)} • Time (CT): ${label}`}
-            formatter={(value: any, name: any, props: any) => {
+            formatter={(value: any, name: any) => {
               if (name === "cum_profit") return [fmtMoney(value), "Cum P/L"];
               if (name === "bet_profit") return [fmtMoney(value), "Bet P/L"];
               if (name === "cum_roi") return [pct(value), "Cum ROI"];

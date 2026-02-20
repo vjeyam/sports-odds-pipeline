@@ -2,12 +2,11 @@
   "name": "sports-odds-fullstack",
   "private": true,
   "scripts": {
-    "dev": "concurrently -n API,WEB \"python -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000\" \"npm --prefix web run dev\""
+    "dev": "concurrently -n API,WEB \"python -m uvicorn api.main:app --reload --host 127.0.0.1 --port 8000\" \"npm --prefix web run dev\"",
+    "build": "npm --prefix web run build",
+    "lint": "npm --prefix web run lint"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
-  },
-  "dependencies": {
-    "recharts": "^3.7.0"
   }
 }

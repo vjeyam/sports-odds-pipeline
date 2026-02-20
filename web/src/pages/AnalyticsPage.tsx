@@ -7,7 +7,6 @@ import {
   getStrategyRoiBuckets,
   type AnalyticsDailyRow,
   type AnalyticsSummary,
-  type RoiBucketRow,
   type StrategyEquityPoint,
   type StrategyName,
   type StrategySummaryRow,
@@ -21,7 +20,7 @@ import { th, td } from "../styles/ui";
 
 import "../styles/analytics.css";
 
-const MIN_DATE = "2026-02-19"; // earliest allowed date (local ISO YYYY-MM-DD)
+const MIN_DATE = "2026-02-19";
 
 function todayISO(): string {
   const d = new Date();
@@ -69,7 +68,6 @@ type ChartsLayout = "scroll" | "two-up";
 export default function AnalyticsPage() {
   const maxDate = todayISO();
 
-  // Default start = max(MIN_DATE, today-7)
   const defaultStart = useMemo(() => {
     const s = isoDaysAgo(7);
     return s < MIN_DATE ? MIN_DATE : s;
@@ -90,10 +88,8 @@ export default function AnalyticsPage() {
   const [strategyRows, setStrategyRows] = useState<StrategySummaryRow[]>([]);
   const [strategy, setStrategy] = useState<StrategyName>("favorite");
   const [equity, setEquity] = useState<StrategyEquityPoint[]>([]);
-  const [buckets, setBuckets] = useState<RoiBucketRow[]>([]);
   const [nBetsInBuckets, setNBetsInBuckets] = useState<number>(0);
 
-  // view toggle for charts
   const [chartsLayout, setChartsLayout] = useState<ChartsLayout>("scroll");
 
   const rangeLabel = useMemo(() => `Range: ${start} → ${end}`, [start, end]);
@@ -115,14 +111,12 @@ export default function AnalyticsPage() {
       setDaily(d.daily);
       setStrategyRows(stratSummary.strategies);
       setEquity(stratEquity.equity);
-      setBuckets(stratBuckets.buckets);
       setNBetsInBuckets(stratBuckets.n_bets_in_range);
     } catch (e) {
       setSummary(null);
       setDaily([]);
       setStrategyRows([]);
       setEquity([]);
-      setBuckets([]);
       setNBetsInBuckets(0);
       setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
@@ -140,11 +134,9 @@ export default function AnalyticsPage() {
         getStrategyRoiBuckets(next, start, end),
       ]);
       setEquity(eq.equity);
-      setBuckets(rb.buckets);
       setNBetsInBuckets(rb.n_bets_in_range);
     } catch (e) {
       setEquity([]);
-      setBuckets([]);
       setNBetsInBuckets(0);
       setError(e instanceof Error ? e.message : "Unknown error");
     }
@@ -155,22 +147,18 @@ export default function AnalyticsPage() {
     const rawStart = isoDaysAgo(days);
     const nextStart = clampISODate(rawStart, MIN_DATE, max);
     const nextEnd = clampISODate(max, MIN_DATE, max);
-
-    // If nextStart somehow ends up after end, clamp it
     const finalStart = nextStart > nextEnd ? nextEnd : nextStart;
 
     setStart(finalStart);
     setEnd(nextEnd);
   }
 
-  // Keep start/end always clamped (covers manual typing)
   useEffect(() => {
     const max = todayISO();
 
     const clampedStart = clampISODate(start, MIN_DATE, max);
     const clampedEnd = clampISODate(end, MIN_DATE, max);
 
-    // Ensure start <= end
     const finalStart = clampedStart > clampedEnd ? clampedEnd : clampedStart;
 
     if (finalStart !== start) setStart(finalStart);
@@ -178,7 +166,6 @@ export default function AnalyticsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start, end]);
 
-  // Load whenever range changes
   useEffect(() => {
     void loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -188,15 +175,14 @@ export default function AnalyticsPage() {
 
   return (
     <div className="analyticsPage">
-      {/* Header */}
       <div className="analyticsHeader">
         <div className="analyticsTitle">Analytics</div>
         <div className="analyticsSubtitle">
-          This page summarizes outcomes and simple strategy performance for the selected date range. ROI assumes a <b>$1 stake</b> per game.
+          This page summarizes outcomes and simple strategy performance for the selected date range. ROI assumes a{" "}
+          <b>$1 stake</b> per game.
         </div>
       </div>
 
-      {/* Controls */}
       <div className="card">
         <div className="controlsRow">
           <label className="field">
@@ -210,7 +196,6 @@ export default function AnalyticsPage() {
               onChange={(e) => {
                 const max = todayISO();
                 const next = clampISODate(e.target.value, MIN_DATE, max);
-                // keep start <= end
                 setStart(next > end ? end : next);
               }}
             />
@@ -227,7 +212,6 @@ export default function AnalyticsPage() {
               onChange={(e) => {
                 const max = todayISO();
                 const next = clampISODate(e.target.value, MIN_DATE, max);
-                // keep start <= end
                 setEnd(next < start ? start : next);
               }}
             />
@@ -272,7 +256,6 @@ export default function AnalyticsPage() {
 
       <ErrorBox error={error} />
 
-      {/* KPI cards */}
       {summary && (
         <>
           <div className="kpiGrid">
@@ -318,7 +301,6 @@ export default function AnalyticsPage() {
         </>
       )}
 
-      {/* Strategy Performance */}
       <div className="section">
         <h3 className="sectionTitle">Strategy Performance</h3>
 
@@ -349,20 +331,13 @@ export default function AnalyticsPage() {
           </table>
         </div>
 
-        {/* Strategy toggle row */}
         <div className="toolbarRow">
           <div className="pill">
             Strategy view: <b>{stratLabel(strategy)}</b>
           </div>
 
           {(["favorite", "underdog", "home", "away"] as StrategyName[]).map((s) => (
-            <button
-              key={s}
-              className="btn"
-              onClick={() => void loadStrategyOnly(s)}
-              disabled={strategy === s || loading}
-              type="button"
-            >
+            <button key={s} className="btn" onClick={() => void loadStrategyOnly(s)} disabled={strategy === s || loading} type="button">
               {stratLabel(s)}
             </button>
           ))}
@@ -374,7 +349,6 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* Charts row 1 */}
         <div className={chartsClass}>
           <div className="chartCard">
             <div className="chartCardHeader">
@@ -399,7 +373,6 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* Charts row 2 */}
         <div className={chartsClass} style={{ marginTop: 12 }}>
           <div className="chartCard">
             <div className="chartCardHeader">
