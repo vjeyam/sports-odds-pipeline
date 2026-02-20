@@ -1,9 +1,6 @@
 name: Scheduled ETL (Odds + Results)
 
 on:
-  push:
-    branches: [main]
-
   schedule:
     # GitHub cron is UTC
     # Odds: ~07:05 CT (CST + CDT)
@@ -37,11 +34,12 @@ concurrency:
 jobs:
   etl:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     env:
-      # Your repo secret can be odds.sqlite OR a postgres URL.
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SQLITE_PATH: ${{ github.workspace }}/data/demo_odds.sqlite
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Checkout
@@ -85,6 +83,15 @@ jobs:
           echo "task=$TASK" >> "$GITHUB_OUTPUT"
           echo "Selected task: $TASK"
 
+      - name: Print run context
+        shell: bash
+        run: |
+          echo "event=${{ github.event_name }}"
+          echo "schedule=${{ github.event.schedule }}"
+          echo "selected_task=${{ steps.decide.outputs.task }}"
+          echo "sha=${{ github.sha }}"
+          echo "run_id=${{ github.run_id }}"
+
       - name: Resolve DB target (Postgres vs SQLite)
         id: db
         shell: bash
@@ -119,29 +126,64 @@ jobs:
           print("Configured SQLite for CI:", db)
           PY
 
-      # --------------------
-      # ODDS
-      # --------------------
-      - name: Pull odds snapshot
+      - name: Ensure ODDS_API_KEY present (odds/all only)
+        if: steps.decide.outputs.task == 'odds' || steps.decide.outputs.task == 'all'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.ODDS_API_KEY }}" ]; then
+            echo "Missing GitHub secret: ODDS_API_KEY"
+            exit 1
+          fi
+
+      # Odds (with retries + skip-if-no-events)
+      - name: Pull odds snapshot (retry x3)
         if: steps.decide.outputs.task == 'odds' || steps.decide.outputs.task == 'all'
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        shell: bash
         run: |
-          python -m src.pipelines.run_odds_snapshot \
-            --sport basketball_nba \
-            --regions us \
-            --db "${{ steps.db.outputs.db_target }}"
+          set -euo pipefail
+          for i in 1 2 3; do
+            echo "Odds run attempt $i..."
+            if python -m src.pipelines.run_odds_snapshot \
+              --sport basketball_nba \
+              --regions us \
+              --db "${{ steps.db.outputs.db_target }}" \
+              --skip-if-no-events; then
+              echo "Odds run succeeded."
+              break
+            fi
+            echo "Odds run failed. Sleeping before retry..."
+            sleep 10
+            if [ "$i" -eq 3 ]; then
+              echo "Odds run failed after 3 attempts."
+              exit 1
+            fi
+          done
 
-      # --------------------
-      # RESULTS + TRANSFORMS
-      # --------------------
-      - name: Pull ESPN results (yesterday Chicago)
+      # Results + transforms (with retries)
+      - name: Pull ESPN results (yesterday Chicago) (retry x3)
         if: steps.decide.outputs.task == 'results' || steps.decide.outputs.task == 'all'
+        shell: bash
         run: |
+          set -euo pipefail
           YDAY=$(TZ=America/Chicago date -d 'yesterday' +%Y%m%d)
-          python -m src.pipelines.run_espn_results_pull \
-            --db "${{ steps.db.outputs.db_target }}" \
-            --date "$YDAY"
+          for i in 1 2 3; do
+            echo "Results pull attempt $i for $YDAY..."
+            if python -m src.pipelines.run_espn_results_pull \
+              --db "${{ steps.db.outputs.db_target }}" \
+              --date "$YDAY"; then
+              echo "Results pull succeeded."
+              break
+            fi
+            echo "Results pull failed. Sleeping before retry..."
+            sleep 10
+            if [ "$i" -eq 3 ]; then
+              echo "Results pull failed after 3 attempts."
+              exit 1
+            fi
+          done
 
       - name: Run transforms (build fact tables)
         if: steps.decide.outputs.task == 'results' || steps.decide.outputs.task == 'all'
@@ -156,9 +198,7 @@ jobs:
           print("Transforms completed.")
           PY
 
-      # --------------------
-      # DEBUG COUNTS (SQLite only)
-      # --------------------
+      # Debug counts (SQLite only)
       - name: Debug DB counts (SQLite only)
         if: steps.db.outputs.mode == 'sqlite'
         run: |
@@ -174,6 +214,7 @@ jobs:
             "game_id_map",
             "fact_game_results_best_market",
             "fact_strategy_equity_curve",
+            "etl_run_log",
           ]
           print("DB:", db)
           for t in tables:
@@ -185,11 +226,17 @@ jobs:
           con.close()
           PY
 
-      # --------------------
-      # ARTIFACT UPLOAD (SQLite only)
-      # --------------------
+      # Upload db on failure (SQLite only)
+      - name: Upload artifact on failure (SQLite DB)
+        if: failure() && steps.db.outputs.mode == 'sqlite'
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-demo-odds-sqlite
+          path: ${{ env.SQLITE_PATH }}
+
+      # Artifact upload (SQLite only, success only)
       - name: Upload SQLite DB artifact (SQLite only)
-        if: steps.db.outputs.mode == 'sqlite'
+        if: success() && steps.db.outputs.mode == 'sqlite'
         uses: actions/upload-artifact@v4
         with:
           name: demo_odds-sqlite-${{ steps.decide.outputs.task }}
