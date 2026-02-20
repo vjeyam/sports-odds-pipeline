@@ -4,12 +4,16 @@ import os
 import sqlite3
 from typing import Any, Protocol, runtime_checkable, Optional
 from urllib.parse import urlparse, unquote
+from types import ModuleType
+
+_psycopg: Optional[ModuleType]
 
 try:
-    import psycopg  # type: ignore
+    import psycopg as _psycopg  # type: ignore
 except Exception:  # pragma: no cover
-    psycopg = None  # allows sqlite-only installs
+    _psycopg = None
 
+psycopg = _psycopg
 
 DDL = """
 -- One row per (snapshot, game, sportsbook, market, outcome)
@@ -231,16 +235,14 @@ def connect(db_path_or_url: Optional[str] = None):
                 "Postgres DATABASE_URL provided but psycopg is not installed. "
                 "Add 'psycopg[binary]' to requirements.txt."
             )
-        conn = psycopg.connect(target)  # type: ignore
-        # Important: most of your ETL does inserts/updates; autocommit off is fine.
-        return conn
+        return psycopg.connect(target) # type: ignore
 
     # SQLite path (or sqlite URL)
     sqlite_path = _sqlite_path_from_target(target)
-    conn = sqlite3.connect(sqlite_path)
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA foreign_keys=ON;")
-    return conn
+    sqlite_conn = sqlite3.connect(sqlite_path)
+    sqlite_conn.execute("PRAGMA journal_mode=WAL;")
+    sqlite_conn.execute("PRAGMA foreign_keys=ON;")
+    return sqlite_conn
 
 
 def ensure_schema(conn) -> None:
