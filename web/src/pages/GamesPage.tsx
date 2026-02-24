@@ -38,12 +38,15 @@ export default function GamesPage() {
   const [oddsRefreshing, setOddsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // NEW: search + status filter
+  // search + status filter
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const loadingRef = useRef(false);
   const live = hasLiveGames(rows);
+
+  const today = useMemo(() => todayISO(), []);
+  const canRefreshOdds = date === today;
 
   const stats = useMemo(() => {
     const total = rows.length;
@@ -91,6 +94,7 @@ export default function GamesPage() {
     setRefreshing(true);
     setError(null);
     try {
+      // IMPORTANT: refreshResults expects YYYY-MM-DD dates (you already pass [date]).
       await refreshResults([date]);
       await load();
     } catch (e) {
@@ -101,12 +105,16 @@ export default function GamesPage() {
   }
 
   async function onRefreshOdds() {
+    // Odds API refresh is only reliable for "today" (historical odds is a different endpoint/plan).
+    if (!canRefreshOdds) return;
+
+    setOddsRefreshing(true);
+    setError(null);
     try {
-      setOddsRefreshing(true);
       await refreshOdds();
       await load();
-    } catch (e: any) {
-      alert(`Error refreshing odds: ${e?.message ?? e}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unknown error");
     } finally {
       setOddsRefreshing(false);
     }
@@ -149,10 +157,11 @@ export default function GamesPage() {
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
+            max={today} // prevents selecting future dates (keeps UX consistent w/ refresh behavior)
           />
         </label>
 
-        {/* NEW: Search */}
+        {/* Search */}
         <label className="gpField">
           <span className="gpLabel">Search team</span>
           <input
@@ -163,7 +172,7 @@ export default function GamesPage() {
           />
         </label>
 
-        {/* NEW: Status filter */}
+        {/* Status filter */}
         <label className="gpField">
           <span className="gpLabel">Status</span>
           <select
@@ -187,7 +196,16 @@ export default function GamesPage() {
           {refreshing ? "Refreshing Results..." : "Refresh Results"}
         </button>
 
-        <button className="gpBtn" onClick={onRefreshOdds} disabled={oddsRefreshing}>
+        <button
+          className="gpBtn"
+          onClick={onRefreshOdds}
+          disabled={oddsRefreshing || !canRefreshOdds}
+          title={
+            canRefreshOdds
+              ? "Runs odds ETL for today (live/upcoming odds)"
+              : "Odds refresh is only supported for today. Historical odds requires a different endpoint/plan."
+          }
+        >
           {oddsRefreshing ? "Refreshing Odds..." : "Refresh Odds"}
         </button>
 
@@ -217,7 +235,7 @@ export default function GamesPage() {
             </span>
           </div>
 
-          {/* NEW: filtered count (super helpful) */}
+          {/* filtered count */}
           <div className="gpStats" title="Filtered rows shown below">
             <span>
               Showing: <b>{filteredRows.length}</b>

@@ -245,10 +245,22 @@ def connect(db_path_or_url: Optional[str] = None):
     return sqlite_conn
 
 
-def ensure_schema(conn) -> None:
+def ensure_schema(conn_or_target) -> None:
     """
-    Create required tables if they don't exist (SQLite or Postgres).
+    Ensure DB schema exists.
+
+    Accepts either:
+      - a live connection object (psycopg connection / sqlite connection), OR
+      - a DB target string (DATABASE_URL / sqlite path)
     """
+    # If caller passed a DATABASE_URL / sqlite path string, open a connection first.
+    if isinstance(conn_or_target, str):
+        with connect(conn_or_target) as conn:
+            ensure_schema(conn)
+        return
+
+    conn = conn_or_target
+    
     module = conn.__class__.__module__
     is_sqlite = module.startswith("sqlite3")
     is_postgres = module.startswith("psycopg")

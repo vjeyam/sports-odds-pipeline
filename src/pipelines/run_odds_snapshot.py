@@ -14,7 +14,7 @@ from src.extract.odds_api import fetch_odds_moneyline, print_quota_headers
 from src.load.raw_odds_loader import flatten_moneyline, insert_raw_moneyline_rows
 from src.transform.build_closing_lines import build_closing_lines
 from src.transform.build_best_market_lines import build_best_market_lines
-
+from src.db import connect, ensure_schema
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -94,18 +94,17 @@ def _ensure_etl_run_log(db_target: str) -> None:
     Minimal run log table for 'production freshness' observability.
     Works for SQLite and Postgres (assumes src.db.connect can handle URL/path).
     """
-    from src.db import connect, ensure_schema
+    with connect(db_target) as conn:
+        # Ensure base schema (tables, etc.)
+        ensure_schema(conn)
 
-    ensure_schema(db_target)
-
-    with connect(db_target) as con:
-        cur = con.cursor()
+        # Ensure the run log table exists
+        cur = conn.cursor()
         cur.execute(ETL_RUN_LOG_DDL)
-        con.commit()
+        conn.commit()
 
 
 def _insert_etl_run_log(db_target: str, row: dict[str, Any]) -> None:
-    from src.db import connect
 
     values = (
         row.get("run_id"),
