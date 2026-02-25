@@ -11,6 +11,7 @@ from api.router.games import router as games_router
 from api.router.health import router as health_router
 from api.router.jobs import router as jobs_router
 from api.router.strategies import router as strategies_router
+from api.router import games, etl
 
 load_dotenv()
 
@@ -41,3 +42,5 @@ app.include_router(analytics_router)
 app.include_router(strategies_router)
 app.include_router(etl_router)
 app.include_router(jobs_router)
+app.include_router(games.router)
+app.include_router(etl.router)
