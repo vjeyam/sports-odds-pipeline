@@ -4,6 +4,12 @@ ETL + analytics pipeline that tracks NBA moneyline odds across sportsbooks, stor
 
 The point is to see how well the market prices games and whether simple strategies (favorite, underdog, home, away) hold up over time.
 
+Below what the user sees for the dashboard.
+
+![Demo Dashboard](demo-dashboard.png)
+
+![Demo Plots](demo-plots.png)
+
 ## What it does
 
 Odds snapshots come from the [Odds API](https://the-odds-api.com/liveapi/guides/v4/#example-response-5) (FanDuel, DraftKings, BetMGM, and others) and game results from the [ESPN API](https://gist.github.com/akeaswaran/b48b02f1c94f873c6655e7129910fc3b?permalink_comment_id=5696426&utm_source). Both get transformed and stored in Postgres. The React frontend hits a Spring Boot API, which delegates data/ETL work to a Python FastAPI service.
